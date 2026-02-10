@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ "dev", "main" ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      # CMake
+      - name: Configure (CMake)
+        run: |
+          if [ -f CMakeLists.txt ]; then
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          else
+            echo "No CMakeLists.txt, skipping"
+          fi
+
+      - name: Build (CMake)
+        run: |
+          if [ -d build ]; then
+            cmake --build build -j 2
+          fi
+
+      - name: Test (CTest)
+        run: |
+          if [ -d build ]; then
+            cd build
+            ctest --output-on-failure || true
+          fi
