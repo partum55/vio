@@ -11,8 +11,9 @@
 
 namespace vio {
 
-Viewer::Viewer(const Trajectory& trajectory, const PointCloud& cloud)
-    : trajectory_(trajectory), cloud_(cloud) {}
+Viewer::Viewer(const Trajectory& trajectory, const PointCloud& cloud,
+               const LineSet& lines)
+    : trajectory_(trajectory), cloud_(cloud), lines_(lines) {}
 
 // ─── Interactive viewer ──────────────────────────────────────────────
 
@@ -122,6 +123,7 @@ void Viewer::record(const RecordConfig& cfg) {
 
         drawGrid();
         drawPointCloud();
+        drawDashedLines();
         drawTrajectory(pose_idx);       // trail up to current pose
         drawCurrentFrustum(pose_idx);   // highlight current camera
         drawCameraFrustums();
@@ -160,6 +162,7 @@ void Viewer::record(const RecordConfig& cfg) {
 void Viewer::drawScene() {
     drawGrid();
     drawPointCloud();
+    drawDashedLines();
     drawTrajectory();
     drawCameraFrustums();
 }
@@ -244,6 +247,24 @@ void Viewer::drawCameraFrustums() {
 
         glPopMatrix();
     }
+}
+
+void Viewer::drawDashedLines() {
+    if (lines_.empty()) return;
+
+    glEnable(GL_LINE_STIPPLE);
+    glLineStipple(2, 0x00FF); // dashed pattern
+    glLineWidth(1.0f);
+
+    glBegin(GL_LINES);
+    for (const auto& line : lines_) {
+        glColor4f(line.color.x(), line.color.y(), line.color.z(), 0.2f);
+        glVertex3d(line.start.x(), line.start.y(), line.start.z());
+        glVertex3d(line.end.x(), line.end.y(), line.end.z());
+    }
+    glEnd();
+
+    glDisable(GL_LINE_STIPPLE);
 }
 
 void Viewer::drawGrid() {
