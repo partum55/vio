@@ -12,6 +12,7 @@
 
 #include <opencv2/opencv.hpp>
 #include <filesystem>
+#include <stdexcept>
 #include <iostream>
 
 // Bilinear = двовимірна лінійна інтерполяція.
@@ -93,47 +94,96 @@ static std::vector<cv::Mat> buildPyramid(const cv::Mat& imgGray, int levels)
     return pyr;
 }
 
-// Sobel 3x3 gradients for CV_32FC1
-static void computeGradients(const cv::Mat& imgF, cv::Mat& Ix, cv::Mat& Iy)
+static int border_replicate(const int val, const int min, const int max)
 {
-    if (imgF.empty()) throw std::runtime_error("computeGradients: empty image");
-    if (imgF.type() != CV_32FC1) throw std::runtime_error("computeGradients: expected CV_32FC1");
-    if (imgF.channels() != 1) throw std::runtime_error("computeGradients: expected 1-channel image");
-
-    const int rows = imgF.rows;
-    const int cols = imgF.cols;
+    if (val < min) return min;
+    if (val > max) return max;
+    return val;
 }
+
+// Sobel 3x3 gradients for CV_32FC1
+static void computeGradients(const cv::Mat& img_grayscale_float, cv::Mat& Ix, cv::Mat& Iy)
+{
+    if (img_grayscale_float.empty()) throw std::runtime_error("computeGradients: empty image");
+    if (img_grayscale_float.type() != CV_32FC1) throw std::runtime_error("computeGradients: expected CV_32FC1");
+    if (img_grayscale_float.channels() != 1) throw std::runtime_error("computeGradients: expected 1-channel image");
+
+    const int rows = img_grayscale_float.rows;
+    const int cols = img_grayscale_float.cols;
+
+    Ix.create(rows, cols, CV_32FC1);
+    Iy.create(rows, cols, CV_32FC1);
+
+    // Sobel kernels:
+    // Gx = [ -1  0  +1
+    //        -2  0  +2
+    //        -1  0  +1 ]
+    //
+    // Gy = [ -1 -2 -1
+    //         0  0  0
+    //        +1 +2 +1 ]
+
+    for (int y = 0; y < rows; ++y) {
+        float* outX = Ix.ptr<float>(y);
+        float* outY = Iy.ptr<float>(y);
+
+        for (int x = 0; x < cols; ++x) {
+            const int xm1 = border_replicate(x - 1, 0, cols - 1);
+            const int xp1 = border_replicate(x + 1, 0, cols - 1);
+            const int ym1 = border_replicate(y - 1, 0, rows - 1);
+            const int yp1 = border_replicate(y + 1, 0, rows - 1);
+
+            const float a00 = img_grayscale_float.at<float>(ym1, xm1);
+            const float a01 = img_grayscale_float.at<float>(ym1, x);
+            const float a02 = img_grayscale_float.at<float>(ym1, xp1);
+
+            const float a10 = img_grayscale_float.at<float>(y,   xm1);
+            const float a11 = img_grayscale_float.at<float>(y,   x);
+            const float a12 = img_grayscale_float.at<float>(y,   xp1);
+
+            const float a20 = img_grayscale_float.at<float>(yp1, xm1);
+            const float a21 = img_grayscale_float.at<float>(yp1, x);
+            const float a22 = img_grayscale_float.at<float>(yp1, xp1);
+
+            const float Gx =
+                (-1.f)*a00 + (0.f)*a01 + (1.f)*a02 +
+                (-2.f)*a10 + (0.f)*a11 + (2.f)*a12 +
+                (-1.f)*a20 + (0.f)*a21 + (1.f)*a22;
+
+            const float Gy =
+                (-1.f)*a00 + (-2.f)*a01 + (-1.f)*a02 +
+                 (0.f)*a10 +  (0.f)*a11 +  (0.f)*a12 +
+                 (1.f)*a20 +  (2.f)*a21 +  (1.f)*a22;
+
+            outX[x] = Gx;
+            outY[x] = Gy;
+        }
+    }
+}
+
 // extractPatch
 //
 // computeLKSystemTranslation
 
-static bool solve2x2(const cv::Matx22f& H,const cv::Vec2f& val, cv::Vec2f& delta, float minDet = 1e-6f)
+static bool solve2x2(const cv::Matx22f& H,const cv::Vec2f& val, cv::Vec2f& delta, const float minDet = 1e-6f)
 {
     // H = [ a  b ]
     //     [ c  d ]
+    const float a = H(0,0);
+    const float b = H(0,1);
+    const float c = H(1,0);
+    const float d = H(1,1);
 
-    float a = H(0,0);
-    float b = H(0,1);
-    float c = H(1,0);
-    float d = H(1,1);
-
-    float det = a * d - b * c;
+    const float det = a * d - b * c;
     if (std::abs(det) < minDet)
         return false;
 
-    float invDet = 1.0f / det;
-
-    // Hinv:
-    // 1/det * [  d  -b ]
-    //         [ -c   a ]
-
-    cv::Matx22f Hinv(
+    const float invDet = 1.0f / det;
+    const cv::Matx22f H_inv(
          d * invDet,   -b * invDet,
         -c * invDet,    a * invDet
     );
-
-    delta = Hinv * val;
-
+    delta = H_inv * val;
     return true;
 }
 
