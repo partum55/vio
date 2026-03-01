@@ -1,0 +1,70 @@
+[
+    {
+        "arguments": [
+            "/usr/bin/c++",
+            "-isystem/opt/homebrew/Cellar/opencv/4.13.0_3/include/opencv4",
+            "-g",
+            "-std=gnu++20",
+            "-arch",
+            "arm64",
+            "-fcolor-diagnostics",
+            "-DPVS_STUDIO",
+            "-DPVS_VERSION_MAJOR=7",
+            "-DPVS_VERSION_MINOR=38",
+            "/Users/margopaduchak/Desktop/acs/project/main.cpp"
+        ],
+        "dependencies": [],
+        "id": 2
+    },
+    {
+        "arguments": [
+            "/usr/bin/c++",
+            "-g",
+            "-std=gnu++20",
+            "-arch",
+            "arm64",
+            "-fcolor-diagnostics",
+            "-DPVS_STUDIO",
+            "-DPVS_VERSION_MAJOR=7",
+            "-DPVS_VERSION_MINOR=38",
+            "/Users/margopaduchak/Desktop/acs/project/main.cpp"
+        ],
+        "dependencies": [],
+        "id": 1
+    },
+    {
+        "arguments": [
+            "/usr/bin/c++",
+            "-isystem/opt/homebrew/Cellar/opencv/4.13.0_3/include/opencv4",
+            "-DNDEBUG",
+            "-std=gnu++20",
+            "-arch",
+            "arm64",
+            "-fcolor-diagnostics",
+            "-DPVS_STUDIO",
+            "-DPVS_VERSION_MAJOR=7",
+            "-DPVS_VERSION_MINOR=38",
+            "/Users/margopaduchak/Desktop/acs/project/main.cpp"
+        ],
+        "dependencies": [],
+        "id": 3
+    },
+    {
+        "arguments": [
+            "/usr/bin/c++",
+            "-isystem/opt/homebrew/Cellar/opencv/4.13.0_3/include/opencv4",
+            "-g",
+            "-DNDEBUG",
+            "-std=gnu++20",
+            "-arch",
+            "arm64",
+            "-fcolor-diagnostics",
+            "-DPVS_STUDIO",
+            "-DPVS_VERSION_MAJOR=7",
+            "-DPVS_VERSION_MINOR=38",
+            "/Users/margopaduchak/Desktop/acs/project/main.cpp"
+        ],
+        "dependencies": [],
+        "id": 4
+    }
+]
