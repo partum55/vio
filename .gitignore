@@ -42,4 +42,6 @@
 
 .idea/
 build/
-
+__pycache__/
+*.pyc
+python/.venv/

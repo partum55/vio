@@ -1,0 +1,4 @@
+numpy>=1.23
+open3d>=0.18
+matplotlib>=3.6
+tornado>=6.2
