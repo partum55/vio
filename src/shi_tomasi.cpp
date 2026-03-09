@@ -1,86 +1,94 @@
 #include "shi_tomasi.hpp"
 
-static cv::Mat toGrayFloat01(const cv::Mat &imgBgrOrGray)
+#include <algorithm>
+#include <cmath>
+
+using namespace std;
+
+cv::Mat CustomShiTomasiDetector::toGrayFloat01(const cv::Mat &imgBgrOrGray)
 {
     cv::Mat gray;
     if (imgBgrOrGray.channels() == 3)
     {
         cv::cvtColor(imgBgrOrGray, gray, cv::COLOR_BGR2GRAY);
     }
+    else if (imgBgrOrGray.channels() == 4)
+    {
+        cv::cvtColor(imgBgrOrGray, gray, cv::COLOR_BGRA2GRAY);
+    }
     else
     {
         gray = imgBgrOrGray;
     }
-    cv::Mat gray32;
-    gray.convertTo(gray32, CV_32F, 1.0 / 255.0);
-    return gray32;
+
+    gray.convertTo(gray32_, CV_32F, 1.0 / 255.0);
+    return gray32_;
 }
 
-// lambda_min for each pixel
-static cv::Mat shiTomasiScoreImage(const cv::Mat &gray32, const ShiTomasiParams &p)
+cv::Mat CustomShiTomasiDetector::shiTomasiScoreImage(
+    const cv::Mat &gray32,
+    const ShiTomasiParams &p)
 {
-    cv::Mat blur;
-    cv::GaussianBlur(gray32, blur, cv::Size(0, 0), p.gaussianSigma, p.gaussianSigma);
+    cv::GaussianBlur(
+        gray32,
+        blur_,
+        cv::Size(0, 0),
+        p.gaussianSigma,
+        p.gaussianSigma);
 
-    cv::Mat Ix, Iy;
-    cv::Sobel(blur, Ix, CV_32F, 1, 0, p.sobelKSize);
-    cv::Sobel(blur, Iy, CV_32F, 0, 1, p.sobelKSize);
+    cv::Sobel(blur_, Ix_, CV_32F, 1, 0, p.sobelKSize);
+    cv::Sobel(blur_, Iy_, CV_32F, 0, 1, p.sobelKSize);
 
-    cv::Mat Ixx = Ix.mul(Ix);
-    cv::Mat Iyy = Iy.mul(Iy);
-    cv::Mat Ixy = Ix.mul(Iy);
+    cv::multiply(Ix_, Ix_, Ixx_);
+    cv::multiply(Iy_, Iy_, Iyy_);
+    cv::multiply(Ix_, Iy_, Ixy_);
 
-    // sum over patch
-    // blockSize is the patch size
-    double sigmaTensor = std::max(0.5, p.blockSize / 3.0);
-    cv::GaussianBlur(Ixx, Ixx, cv::Size(0, 0), sigmaTensor, sigmaTensor);
-    cv::GaussianBlur(Iyy, Iyy, cv::Size(0, 0), sigmaTensor, sigmaTensor);
-    cv::GaussianBlur(Ixy, Ixy, cv::Size(0, 0), sigmaTensor, sigmaTensor);
+    double sigmaTensor = std::max(0.5, p.blockSize / 6.0);
 
-    // lambda_min = tr/2 - sqrt((tr/2)^2 - det)
-    cv::Mat trace = Ixx + Iyy;
-    cv::Mat det = Ixx.mul(Iyy) - Ixy.mul(Ixy);
+    cv::GaussianBlur(Ixx_, Ixx_, cv::Size(0, 0), sigmaTensor, sigmaTensor);
+    cv::GaussianBlur(Iyy_, Iyy_, cv::Size(0, 0), sigmaTensor, sigmaTensor);
+    cv::GaussianBlur(Ixy_, Ixy_, cv::Size(0, 0), sigmaTensor, sigmaTensor);
 
-    cv::Mat halfTrace = 0.5f * trace;
-    cv::Mat inside = halfTrace.mul(halfTrace) - det;
+    trace_ = Ixx_ + Iyy_;
+    det_ = Ixx_.mul(Iyy_) - Ixy_.mul(Ixy_);
 
-    // numerical stability
-    cv::max(inside, 0, inside);
+    halfTrace_ = 0.5f * trace_;
+    inside_ = halfTrace_.mul(halfTrace_) - det_;
 
-    cv::Mat sqrtInside;
-    cv::sqrt(inside, sqrtInside);
+    cv::max(inside_, 0, inside_);
+    cv::sqrt(inside_, sqrtInside_);
 
-    cv::Mat score = halfTrace - sqrtInside;
-    cv::max(score, 0, score);
+    score_ = halfTrace_ - sqrtInside_;
+    cv::max(score_, 0, score_);
 
-    return score;
+    return score_;
 }
 
-// NMS - non-maximum suppression: keep only local max
-static cv::Mat nmsLocalMax(const cv::Mat &score, int r)
+cv::Mat CustomShiTomasiDetector::nmsLocalMax(const cv::Mat &score, int r)
 {
-    cv::Mat dilated;
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(2 * r + 1, 2 * r + 1));
-    cv::dilate(score, dilated, kernel);
+    cv::Mat kernel = cv::getStructuringElement(
+        cv::MORPH_RECT,
+        cv::Size(2 * r + 1, 2 * r + 1));
 
-    cv::Mat isMax = (score == dilated);
-    // zero-out non-max
+    cv::dilate(score, dilated_, kernel);
+
+    cv::Mat isMax = (score == dilated_);
+
     cv::Mat out = cv::Mat::zeros(score.size(), score.type());
     score.copyTo(out, isMax);
     return out;
 }
 
-std::vector<cv::Point2f> extractShiTomasiKeypoints(const cv::Mat &img, const ShiTomasiParams &p)
+std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
+    const cv::Mat &scoreNms,
+    const ShiTomasiParams &p)
 {
-    cv::Mat gray32 = toGrayFloat01(img);
-    cv::Mat score = shiTomasiScoreImage(gray32, p);
-    cv::Mat scoreNms = nmsLocalMax(score, p.nmsRadius);
-
-    double minVal, maxVal;
+    double minVal = 0.0;
+    double maxVal = 0.0;
     cv::minMaxLoc(scoreNms, &minVal, &maxVal);
-    const auto thresh = static_cast<float>(p.qualityLevel * maxVal);
 
-    // collect candidates
+    const float thresh = static_cast<float>(p.qualityLevel * maxVal);
+
     std::vector<Candidate> cand;
     cand.reserve(scoreNms.rows * scoreNms.cols / 20);
 
@@ -91,44 +99,120 @@ std::vector<cv::Point2f> extractShiTomasiKeypoints(const cv::Mat &img, const Shi
         {
             float s = row[x];
             if (s >= thresh)
+            {
                 cand.push_back({s, x, y});
+            }
         }
     }
 
-    // sort by score desc
-    std::sort(cand.begin(), cand.end(), [](const Candidate &a, const Candidate &b)
-              { return a.score > b.score; });
+    std::sort(cand.begin(), cand.end(),
+              [](const Candidate &a, const Candidate &b)
+              {
+                  return a.score > b.score;
+              });
 
-    // greedy minDistance selection
     std::vector<cv::Point2f> pts;
-    pts.reserve(std::min<int>(p.maxCorners, (int)cand.size()));
+    pts.reserve(std::min<int>(p.maxCorners, static_cast<int>(cand.size())));
 
-    const auto minDist2 = static_cast<float>(p.minDistance * p.minDistance);
+    const float minDist = static_cast<float>(p.minDistance);
+    const float minDist2 = minDist * minDist;
+
+    const int cellSize = std::max(1, static_cast<int>(std::ceil(minDist)));
+    const int gridCols = (scoreNms.cols + cellSize - 1) / cellSize;
+    const int gridRows = (scoreNms.rows + cellSize - 1) / cellSize;
+
+    std::vector<std::vector<int>> grid(gridRows * gridCols);
+
+    auto gridIndex = [gridCols](int gx, int gy)
+    {
+        return gy * gridCols + gx;
+    };
 
     for (const auto &c : cand)
     {
-        if ((int)pts.size() >= p.maxCorners)
+        if (static_cast<int>(pts.size()) >= p.maxCorners)
+        {
             break;
+        }
 
         cv::Point2f pt(
             static_cast<float>(c.x),
-            static_cast<float>(c.y)
-        );
+            static_cast<float>(c.y));
+
+        int gx = c.x / cellSize;
+        int gy = c.y / cellSize;
 
         bool ok = true;
-        for (const auto &chosen : pts)
+
+        for (int nny = std::max(0, gy - 1); nny <= std::min(gridRows - 1, gy + 1); ++nny)
         {
-            float dx = pt.x - chosen.x;
-            float dy = pt.y - chosen.y;
-            if (dx * dx + dy * dy < minDist2)
+            for (int nnx = std::max(0, gx - 1); nnx <= std::min(gridCols - 1, gx + 1); ++nnx)
             {
-                ok = false;
+                const auto &bucket = grid[gridIndex(nnx, nny)];
+                for (int idx : bucket)
+                {
+                    const cv::Point2f &chosen = pts[idx];
+                    float dx = pt.x - chosen.x;
+                    float dy = pt.y - chosen.y;
+
+                    if (dx * dx + dy * dy < minDist2)
+                    {
+                        ok = false;
+                        break;
+                    }
+                }
+
+                if (!ok)
+                {
+                    break;
+                }
+            }
+
+            if (!ok)
+            {
                 break;
             }
         }
+
         if (ok)
+        {
+            int newIndex = static_cast<int>(pts.size());
             pts.push_back(pt);
+            grid[gridIndex(gx, gy)].push_back(newIndex);
+        }
     }
+
+    return pts;
+}
+
+std::vector<cv::Point2f> CustomShiTomasiDetector::detect(
+    const cv::Mat &img,
+    const ShiTomasiParams &params)
+{
+    cv::Mat gray32 = toGrayFloat01(img);
+    cv::Mat score = shiTomasiScoreImage(gray32, params);
+    cv::Mat scoreNms = nmsLocalMax(score, params.nmsRadius);
+
+    return selectWithGrid(scoreNms, params);
+}
+
+std::vector<cv::Point2f> OpenCVShiTomasiDetector::detect(
+    const cv::Mat &img,
+    const ShiTomasiParams &params)
+{
+    cv::Mat gray = toGrayU8(img);
+
+    std::vector<cv::Point2f> pts;
+    cv::goodFeaturesToTrack(
+        gray,
+        pts,
+        params.maxCorners,
+        params.qualityLevel,
+        params.minDistance,
+        cv::noArray(),
+        params.blockSize,
+        false,
+        0.04);
 
     return pts;
 }
@@ -136,29 +220,38 @@ std::vector<cv::Point2f> extractShiTomasiKeypoints(const cv::Mat &img, const Shi
 cv::Mat toGrayU8(const cv::Mat &imgBgrOrGray)
 {
     cv::Mat gray;
+
     if (imgBgrOrGray.channels() == 3)
     {
         cv::cvtColor(imgBgrOrGray, gray, cv::COLOR_BGR2GRAY);
+    }
+    else if (imgBgrOrGray.channels() == 4)
+    {
+        cv::cvtColor(imgBgrOrGray, gray, cv::COLOR_BGRA2GRAY);
     }
     else
     {
         gray = imgBgrOrGray;
     }
+
     if (gray.type() != CV_8U)
     {
         cv::Mat tmp;
         gray.convertTo(tmp, CV_8U);
         return tmp;
     }
+
     return gray;
 }
 
-cv::Mat drawKeypointsOnImage(const cv::Mat &imgBgrOrGray,
-                             const std::vector<cv::Point2f> &pts,
-                             int radius,
-                             int thickness)
+cv::Mat drawKeypointsOnImage(
+    const cv::Mat &imgBgrOrGray,
+    const std::vector<cv::Point2f> &pts,
+    int radius,
+    int thickness)
 {
     cv::Mat vis;
+
     if (imgBgrOrGray.channels() == 1)
     {
         cv::cvtColor(imgBgrOrGray, vis, cv::COLOR_GRAY2BGR);
@@ -170,7 +263,14 @@ cv::Mat drawKeypointsOnImage(const cv::Mat &imgBgrOrGray,
 
     for (const auto &p : pts)
     {
-        cv::circle(vis, p, radius, cv::Scalar(0, 255, 0), thickness, cv::LINE_AA);
+        cv::circle(
+            vis,
+            p,
+            radius,
+            cv::Scalar(0, 255, 0),
+            thickness,
+            cv::LINE_AA);
     }
+
     return vis;
 }
