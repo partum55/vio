@@ -1,7 +1,6 @@
 #include <vector>
 #include <string>
-#include <Eigen/Core>
-#include <Eigen/Geometry>
+#include <Eigen/Dense>
 
 struct ImuSample {
     double t = 0.0;  //в секундах
@@ -19,6 +18,8 @@ struct Pose {
 
 Eigen::Quaterniond deltaQuat(const Eigen::Vector3d& omega, double dt);
 
+
+void integrateImuFiltered(const std::vector<ImuSample>& imu, double t0, double t1, Pose& pose, const Eigen::Vector3d& gravity, std::vector<Pose>& trajectory_out);
 
 void integrateImu(const std::vector<ImuSample>& imu, size_t& idx, double t0, double t1, Pose& pose, const Eigen::Vector3d& gravity_world)
 
