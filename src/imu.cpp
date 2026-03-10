@@ -18,32 +18,90 @@ Eigen::Quaterniond deltaQuat(const Eigen::Vector3d& omega, double dt)
     return dq;
 }
 
-void integrateImu(const std::vector<ImuSample>& imu, size_t& idx, double t0, double t1, Pose& pose, const Eigen::Vector3d& gravity_world)
-{
-    double t = t0;
+class KalmanAxis {
+public:
+    Eigen::Vector2d mu; // [value, derivative]
+    Eigen::Matrix2d Sigma;
 
+    double sigma_meas;
+    double q_process;
+
+    KalmanAxis(double sigma_meas_ = 0.01, double q_process_ = 1.0)
+        : sigma_meas(sigma_meas_), q_process(q_process_)
+    {
+        mu.setZero();
+        Sigma.setIdentity();
+    }
+
+    void init(double first_measurement) {
+        mu << first_measurement, 0.0;
+        Sigma.setIdentity();
+    }
+
+    void predict(double dt) {
+        Eigen::Matrix2d A;
+        A << 1.0, dt,
+             0.0, 1.0;
+
+        Eigen::Matrix2d Q; //шум процесу 
+        Q << dt * dt * dt / 3.0, dt * dt / 2.0,
+             dt * dt / 2.0, dt;
+
+        Q *= q_process;
+
+        mu = A * mu;
+        Sigma = A * Sigma * A.transpose() + Q;
+    }
+
+    double update(double z_meas) {
+        Eigen::RowVector2d H;
+        H << 1.0, 0.0;
+
+        double R = sigma_meas * sigma_meas;
+
+        double innovation = z_meas - (H * mu)(0);
+        double S = (H * Sigma * H.transpose())(0, 0) + R;
+
+        Eigen::Vector2d K = Sigma * H.transpose() / S;
+
+        mu = mu + K * innovation;
+        Sigma = (Eigen::Matrix2d::Identity() - K * H) * Sigma;
+
+        return mu(0);
+    }
+};
+
+void integrateImuRaw(const std::vector<ImuSample>& imu, double t0, double t1, Pose& pose, const Eigen::Vector3d& gravity, std::vector<Pose>& trajectory_out)
+{
+    trajectory_out.clear();
+    trajectory_out.reserve(10000);
+    
+    size_t idx = 0;
+    while (idx < imu.size() && imu[idx].t < t0) idx++;
+    if (idx == imu.size()) return;
+
+    pose.t = imu[idx].t;
     while (idx < imu.size() && imu[idx].t <= t1) {
         const auto& s = imu[idx];
-
-        if (s.t <= t) { idx++; continue; }
-
-        const double dt = s.t - t;
+        double dt = s.t - pose.t;
+        if (dt <= 0) { idx++; continue; }
 
         pose.q *= deltaQuat(s.gyro, dt);
         pose.q.normalize();
 
         Eigen::Vector3d acc_world = pose.q * s.acc;
-        Eigen::Vector3d acc_lin = acc_world - gravity_world;
+        Eigen::Vector3d acc_lin = acc_world - gravity;
 
-        // euler
         pose.v += acc_lin * dt;
         pose.p += pose.v * dt;
 
-        t = s.t;
+        pose.t = s.t;
+        trajectory_out.push_back(pose);
         idx++;
     }
-    pose.t = t1;
 }
+
+
 
 
 bool loadImuCsv(const std::string& path, std::vector<ImuSample>& out)
