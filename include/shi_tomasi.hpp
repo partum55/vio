@@ -1,26 +1,42 @@
 #pragma once
 
+#include "abc_thread_pool.hpp"
 #include "keypoint_detector.hpp"
 
 #include <opencv2/opencv.hpp>
 #include <vector>
 
-struct Candidate
-{
-    float score;
-    int x;
-    int y;
-};
-
 class CustomShiTomasiDetector : public IKeypointDetector
 {
 public:
+    CustomShiTomasiDetector(ABCThreadPool& pool, int num_tasks);
+
     std::vector<cv::Point2f> detect(
         const cv::Mat &img,
         const ShiTomasiParams &params) override;
 
 private:
-    cv::Mat gray32_;
+    struct Candidate
+    {
+        float score;
+        int x;
+        int y;
+    };
+
+    cv::Mat shiTomasiScoreImage(
+        const cv::Mat &gray8,
+        const ShiTomasiParams &p);
+
+    cv::Mat nmsLocalMax(const cv::Mat &score, int r);
+
+    std::vector<cv::Point2f> selectWithGrid(
+        const cv::Mat &scoreNms,
+        const ShiTomasiParams &p);
+
+private:
+    ABCThreadPool& pool_;
+    int num_tasks_;
+
     cv::Mat blur_;
     cv::Mat Ix_;
     cv::Mat Iy_;
@@ -33,17 +49,7 @@ private:
     cv::Mat inside_;
     cv::Mat sqrtInside_;
     cv::Mat score_;
-    cv::Mat scoreNms_;
     cv::Mat dilated_;
-
-private:
-    cv::Mat toGrayFloat01(const cv::Mat &imgBgrOrGray);
-    cv::Mat shiTomasiScoreImage(const cv::Mat &gray32, const ShiTomasiParams &p);
-    cv::Mat nmsLocalMax(const cv::Mat &score, int r);
-
-    std::vector<cv::Point2f> selectWithGrid(
-        const cv::Mat &scoreNms,
-        const ShiTomasiParams &p);
 };
 
 class OpenCVShiTomasiDetector : public IKeypointDetector
@@ -59,5 +65,5 @@ cv::Mat toGrayU8(const cv::Mat &imgBgrOrGray);
 cv::Mat drawKeypointsOnImage(
     const cv::Mat &imgBgrOrGray,
     const std::vector<cv::Point2f> &pts,
-    int radius = 2,
-    int thickness = -1);
+    int radius = 3,
+    int thickness = 1);

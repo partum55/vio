@@ -1,43 +1,90 @@
 #include "gaussian_blur.hpp"
+#include "parallel_utils.hpp"
 
-using namespace cv;
+#include <algorithm>
 
-static int clampInt(int value, int low, int high) {
-    if (value < low) return low;
-    if (value > high) return high;
-    return value;
-}
+cv::Mat convolveHorizontalReplicate(
+    const cv::Mat& image,
+    const float kernel[3],
+    ABCThreadPool& pool,
+    int num_tasks)
+{
+    CV_Assert(image.type() == CV_32F);
+    CV_Assert(image.cols >= 2);
 
-Mat gaussianBlurCustom(const Mat& image) {
-    CV_Assert(image.type() == CV_8U);
+    cv::Mat result(image.rows, image.cols, CV_32F);
 
-    const int kernel[3][3] = {
-        {1, 2, 1},
-        {2, 4, 2},
-        {1, 2, 1}
-    };
+    parallel_for_rows(pool, image.rows, num_tasks,
+        [&](int y0, int y1)
+        {
+            for (int y = y0; y < y1; ++y)
+            {
+                const float* src = image.ptr<float>(y);
+                float* dst = result.ptr<float>(y);
 
-    Mat result(image.rows, image.cols, CV_8U, Scalar(0));
+                dst[0] = kernel[0] * src[0] +
+                         kernel[1] * src[0] +
+                         kernel[2] * src[1];
 
-    for (int y = 0; y < image.rows; ++y) {
-        for (int x = 0; x < image.cols; ++x) {
-            int sum = 0;
-
-            for (int ky = -1; ky <= 1; ++ky) {
-                for (int kx = -1; kx <= 1; ++kx) {
-                    int yy = clampInt(y + ky, 0, image.rows - 1);
-                    int xx = clampInt(x + kx, 0, image.cols - 1);
-
-                    int pixel = static_cast<int>(image.at<uchar>(yy, xx));
-                    int coeff = kernel[ky + 1][kx + 1];
-
-                    sum += pixel * coeff;
+                for (int x = 1; x < image.cols - 1; ++x)
+                {
+                    dst[x] = kernel[0] * src[x - 1] +
+                             kernel[1] * src[x] +
+                             kernel[2] * src[x + 1];
                 }
-            }
 
-            result.at<uchar>(y, x) = static_cast<uchar>(sum / 16);
-        }
-    }
+                const int last = image.cols - 1;
+                dst[last] = kernel[0] * src[last - 1] +
+                            kernel[1] * src[last] +
+                            kernel[2] * src[last];
+            }
+        });
 
     return result;
+}
+
+cv::Mat convolveVerticalReplicate(
+    const cv::Mat& image,
+    const float kernel[3],
+    ABCThreadPool& pool,
+    int num_tasks)
+{
+    CV_Assert(image.type() == CV_32F);
+
+    cv::Mat result(image.rows, image.cols, CV_32F);
+
+    parallel_for_rows(pool, image.rows, num_tasks,
+        [&](int y0, int y1)
+        {
+            for (int y = y0; y < y1; ++y)
+            {
+                float* dst = result.ptr<float>(y);
+
+                const float* row_up   = image.ptr<float>(std::max(0, y - 1));
+                const float* row_mid  = image.ptr<float>(y);
+                const float* row_down = image.ptr<float>(std::min(image.rows - 1, y + 1));
+
+                for (int x = 0; x < image.cols; ++x)
+                {
+                    dst[x] = kernel[0] * row_up[x] +
+                             kernel[1] * row_mid[x] +
+                             kernel[2] * row_down[x];
+                }
+            }
+        });
+
+    return result;
+}
+
+cv::Mat gaussianBlurCustom(
+    const cv::Mat& image,
+    ABCThreadPool& pool,
+    int num_tasks)
+{
+    CV_Assert(image.type() == CV_32F);
+
+    constexpr float kernel[3] = {0.25f, 0.5f, 0.25f};
+
+    cv::Mat temp = convolveHorizontalReplicate(image, kernel, pool, num_tasks);
+    return convolveVerticalReplicate(temp, kernel, pool, num_tasks);
 }

@@ -9,7 +9,6 @@ struct ShiTomasiParams
     double qualityLevel = 0.01;
     double minDistance = 8.0;
     int blockSize = 5;
-    int sobelKSize = 3;
     double gaussianSigma = 1.0;
     int nmsRadius = 2;
 };

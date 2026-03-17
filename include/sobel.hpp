@@ -4,19 +4,19 @@
 
 #include <opencv2/opencv.hpp>
 
-cv::Mat convolveHorizontalReplicate(
+cv::Mat derivativeXCentral(
     const cv::Mat& image,
-    const float kernel[3],
     ABCThreadPool& pool,
     int num_tasks);
 
-cv::Mat convolveVerticalReplicate(
+cv::Mat derivativeYCentral(
     const cv::Mat& image,
-    const float kernel[3],
     ABCThreadPool& pool,
     int num_tasks);
 
-cv::Mat gaussianBlurCustom(
+void centralDifferenceXY(
     const cv::Mat& image,
+    cv::Mat& gx,
+    cv::Mat& gy,
     ABCThreadPool& pool,
     int num_tasks);

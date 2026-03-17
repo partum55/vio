@@ -1,53 +1,50 @@
 #include "shi_tomasi.hpp"
+#include "gaussian_blur.hpp"
+#include "sobel.hpp"
 
 #include <algorithm>
 #include <cmath>
 
 using namespace std;
 
-cv::Mat CustomShiTomasiDetector::toGrayFloat01(const cv::Mat &imgBgrOrGray)
+CustomShiTomasiDetector::CustomShiTomasiDetector(
+    ABCThreadPool& pool,
+    int num_tasks)
+    : pool_(pool),
+      num_tasks_(std::max(1, num_tasks))
 {
-    cv::Mat gray;
-    if (imgBgrOrGray.channels() == 3)
-    {
-        cv::cvtColor(imgBgrOrGray, gray, cv::COLOR_BGR2GRAY);
-    }
-    else if (imgBgrOrGray.channels() == 4)
-    {
-        cv::cvtColor(imgBgrOrGray, gray, cv::COLOR_BGRA2GRAY);
-    }
-    else
-    {
-        gray = imgBgrOrGray;
-    }
-
-    gray.convertTo(gray32_, CV_32F, 1.0 / 255.0);
-    return gray32_;
 }
 
 cv::Mat CustomShiTomasiDetector::shiTomasiScoreImage(
-    const cv::Mat &gray32,
+    const cv::Mat &gray8,
     const ShiTomasiParams &p)
 {
-    cv::GaussianBlur(
-        gray32,
-        blur_,
-        cv::Size(0, 0),
-        p.gaussianSigma,
-        p.gaussianSigma);
+    CV_Assert(gray8.type() == CV_8U);
 
-    cv::Sobel(blur_, Ix_, CV_32F, 1, 0, p.sobelKSize);
-    cv::Sobel(blur_, Iy_, CV_32F, 0, 1, p.sobelKSize);
+    cv::Mat gray32;
+    gray8.convertTo(gray32, CV_32F);
+
+    blur_ = gray32.clone();
+
+    const int blurPasses = std::max(1, static_cast<int>(std::round(p.gaussianSigma)));
+    for (int i = 0; i < blurPasses; ++i)
+    {
+        blur_ = gaussianBlurCustom(blur_, pool_, num_tasks_);
+    }
+
+    centralDifferenceXY(blur_, Ix_, Iy_, pool_, num_tasks_);
 
     cv::multiply(Ix_, Ix_, Ixx_);
     cv::multiply(Iy_, Iy_, Iyy_);
     cv::multiply(Ix_, Iy_, Ixy_);
 
-    double sigmaTensor = std::max(0.5, p.blockSize / 6.0);
-
-    cv::GaussianBlur(Ixx_, Ixx_, cv::Size(0, 0), sigmaTensor, sigmaTensor);
-    cv::GaussianBlur(Iyy_, Iyy_, cv::Size(0, 0), sigmaTensor, sigmaTensor);
-    cv::GaussianBlur(Ixy_, Ixy_, cv::Size(0, 0), sigmaTensor, sigmaTensor);
+    const int tensorPasses = std::max(1, p.blockSize / 2);
+    for (int i = 0; i < tensorPasses; ++i)
+    {
+        Ixx_ = gaussianBlurCustom(Ixx_, pool_, num_tasks_);
+        Iyy_ = gaussianBlurCustom(Iyy_, pool_, num_tasks_);
+        Ixy_ = gaussianBlurCustom(Ixy_, pool_, num_tasks_);
+    }
 
     trace_ = Ixx_ + Iyy_;
     det_ = Ixx_.mul(Iyy_) - Ixy_.mul(Ixy_);
@@ -97,7 +94,7 @@ std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
         const float *row = scoreNms.ptr<float>(y);
         for (int x = 0; x < scoreNms.cols; ++x)
         {
-            float s = row[x];
+            const float s = row[x];
             if (s >= thresh)
             {
                 cand.push_back({s, x, y});
@@ -152,8 +149,8 @@ std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
                 for (int idx : bucket)
                 {
                     const cv::Point2f &chosen = pts[idx];
-                    float dx = pt.x - chosen.x;
-                    float dy = pt.y - chosen.y;
+                    const float dx = pt.x - chosen.x;
+                    const float dy = pt.y - chosen.y;
 
                     if (dx * dx + dy * dy < minDist2)
                     {
@@ -189,8 +186,8 @@ std::vector<cv::Point2f> CustomShiTomasiDetector::detect(
     const cv::Mat &img,
     const ShiTomasiParams &params)
 {
-    cv::Mat gray32 = toGrayFloat01(img);
-    cv::Mat score = shiTomasiScoreImage(gray32, params);
+    cv::Mat gray = toGrayU8(img);
+    cv::Mat score = shiTomasiScoreImage(gray, params);
     cv::Mat scoreNms = nmsLocalMax(score, params.nmsRadius);
 
     return selectWithGrid(scoreNms, params);
