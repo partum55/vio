@@ -23,7 +23,7 @@ int main(int argc, char** argv) {
     Pose pose;
     std::vector<Pose> trajectory;
 
-    integrateImuRaw(imu, t0, t1, pose, gravity, trajectory);
+    integrateImuFiltered(imu, t0, t1, pose, gravity, trajectory);
 
     if (!trajectory.empty()) {
         saveTrajectoryCsv("trajectory.csv", trajectory);

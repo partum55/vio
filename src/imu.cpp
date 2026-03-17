@@ -4,48 +4,44 @@
 #include <iostream>
 #include <iomanip>
 
+
 Eigen::Quaterniond deltaQuat(const Eigen::Vector3d& omega, double dt)
 {
-    double angle = omega.norm() * dt; //omega - швидкість
-    if (angle < 1e-12) {
+    double angle = omega.norm() * dt; //omega це швидкість
+    if (angle < 1e-12) { //дуже малий кут
         return Eigen::Quaterniond(1,0,0,0);
     }
 
-    const Eigen::Vector3d axis = omega.normalized();
-    const Eigen::AngleAxisd aa(angle, axis); // обертання на angle навколо axis
-    Eigen::Quaterniond dq(aa);
-    dq.normalize();
-    return dq;
+    Eigen::Vector3d axis = omega.normalized();
+    return Eigen::Quaterniond(Eigen::AngleAxisd(angle, axis));
 }
 
-class KalmanAxis {
+class Kalman {
 public:
-    Eigen::Vector2d mu; // [value, derivative]
+    Eigen::Vector2d mu;
     Eigen::Matrix2d Sigma;
 
-    double sigma_meas;
-    double q_process;
+    double sigma_meas; //шум сенсора
+    double q_process; //шум моделі руху
 
-    KalmanAxis(double sigma_meas_ = 0.01, double q_process_ = 1.0)
+    Kalman(double sigma_meas_ = 0.01, double q_process_ = 1.0)
         : sigma_meas(sigma_meas_), q_process(q_process_)
     {
-        mu.setZero();
-        Sigma.setIdentity();
+        mu << 0.0, 0.0;
+        Sigma << 1.0, 0.0, 0.0, 1.0;
     }
 
     void init(double first_measurement) {
         mu << first_measurement, 0.0;
-        Sigma.setIdentity();
+        Sigma << sigma_meas * sigma_meas, 0.0, 0.0, 1.0;
     }
 
     void predict(double dt) {
         Eigen::Matrix2d A;
-        A << 1.0, dt,
-             0.0, 1.0;
+        A << 1.0, dt, 0.0, 1.0;
 
-        Eigen::Matrix2d Q; //шум процесу 
-        Q << dt * dt * dt / 3.0, dt * dt / 2.0,
-             dt * dt / 2.0, dt;
+        Eigen::Matrix2d Q;
+        Q << dt * dt * dt / 3.0, dt * dt / 2.0, dt * dt / 2.0, dt;
 
         Q *= q_process;
 
@@ -71,10 +67,82 @@ public:
     }
 };
 
+
+void integrateImuFiltered(const std::vector<ImuSample>& imu, double t0, double t1, Pose& pose, const Eigen::Vector3d& gravity, std::vector<Pose>& trajectory_out)
+{
+    trajectory_out.clear();
+    trajectory_out.reserve(imu.size());
+    size_t idx = 0;
+    while (idx < imu.size() && imu[idx].t < t0)
+        idx++;
+
+    if (idx == imu.size())
+        return;
+
+    Kalman kf_gx(0.02, 1.2), kf_gy(0.02, 1.2), kf_gz(0.02, 1.2);
+    Kalman kf_ax(0.20, 6.0), kf_ay(0.20, 6.0), kf_az(0.20, 6.0);
+
+    const auto& first = imu[idx];
+    kf_gx.init(first.gyro.x());
+    kf_gy.init(first.gyro.y());
+    kf_gz.init(first.gyro.z());
+
+    kf_ax.init(first.acc.x());
+    kf_ay.init(first.acc.y());
+    kf_az.init(first.acc.z());
+
+    pose.t = first.t;
+
+    while (idx < imu.size() && imu[idx].t <= t1) {
+        const auto& s = imu[idx];
+        double dt = s.t - pose.t;
+
+        if (dt <= 0.0) {
+            idx++;
+            continue;
+        }
+
+        kf_gx.predict(dt);
+        kf_gy.predict(dt);
+        kf_gz.predict(dt);
+
+        kf_ax.predict(dt);
+        kf_ay.predict(dt);
+        kf_az.predict(dt);
+
+        Eigen::Vector3d gyro_filtered;
+        Eigen::Vector3d acc_filtered;
+
+        gyro_filtered.x() = kf_gx.update(s.gyro.x());
+        gyro_filtered.y() = kf_gy.update(s.gyro.y());
+        gyro_filtered.z() = kf_gz.update(s.gyro.z());
+
+        acc_filtered.x() = kf_ax.update(s.acc.x());
+        acc_filtered.y() = kf_ay.update(s.acc.y());
+        acc_filtered.z() = kf_az.update(s.acc.z());
+
+        pose.q *= deltaQuat(gyro_filtered, dt);
+        pose.q.normalize();
+
+        Eigen::Vector3d acc_world = pose.q * acc_filtered;
+        Eigen::Vector3d acc_lin = acc_world - gravity;
+
+        Eigen::Vector3d v_prev = pose.v;
+        pose.v += acc_lin * dt;
+        pose.p += v_prev * dt + 0.5 * acc_lin * dt * dt;
+
+        pose.t = s.t;
+        trajectory_out.push_back(pose);
+
+        idx++;
+    }
+}
+
+
 void integrateImuRaw(const std::vector<ImuSample>& imu, double t0, double t1, Pose& pose, const Eigen::Vector3d& gravity, std::vector<Pose>& trajectory_out)
 {
     trajectory_out.clear();
-    trajectory_out.reserve(10000);
+    trajectory_out.reserve(imu.size());
     
     size_t idx = 0;
     while (idx < imu.size() && imu[idx].t < t0) idx++;
@@ -92,8 +160,9 @@ void integrateImuRaw(const std::vector<ImuSample>& imu, double t0, double t1, Po
         Eigen::Vector3d acc_world = pose.q * s.acc;
         Eigen::Vector3d acc_lin = acc_world - gravity;
 
+        Eigen::Vector3d v_prev = pose.v;
         pose.v += acc_lin * dt;
-        pose.p += pose.v * dt;
+        pose.p += v_prev * dt + 0.5 * acc_lin * dt * dt;
 
         pose.t = s.t;
         trajectory_out.push_back(pose);
@@ -103,14 +172,13 @@ void integrateImuRaw(const std::vector<ImuSample>& imu, double t0, double t1, Po
 
 
 
-
 bool loadImuCsv(const std::string& path, std::vector<ImuSample>& out)
 {
     out.clear();
 
     std::ifstream f(path);
     if (!f) {
-        std::cerr << "Could not open IMU CSV: " << path << "\n";
+        std::cerr << "Couldn't open IMU csv: " << path << "\n";
         return false;
     }
 
@@ -133,9 +201,10 @@ bool loadImuCsv(const std::string& path, std::vector<ImuSample>& out)
 
         out.push_back(s);
     }
-
     return !out.empty();
 }
+
+
 
 bool saveTrajectoryCsv(const std::string& path, const std::vector<Pose>& traj)
 {
