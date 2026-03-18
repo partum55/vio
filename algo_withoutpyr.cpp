@@ -95,39 +95,6 @@ static cv::Mat gaussianBlurCustomFloat(const cv::Mat& image)
     return result;
 }
 
-
-static std::vector<cv::Mat> buildPyramid(const cv::Mat& imgGray, const int levels)
-{
-    if (levels < 0)
-        throw std::runtime_error("buildPyramid: levels must be >= 0");
-    std::vector<cv::Mat> pyr;
-    pyr.reserve(levels + 1);
-    // level 0
-    cv::Mat cur = toFloatGray(imgGray);
-    pyr.push_back(cur);
-    for (int i = 1; i <= levels; ++i)
-    {
-        const cv::Mat& prev = pyr.back();
-        cv::Mat blurred = gaussianBlurCustomFloat(prev);
-        if (prev.cols < 2 || prev.rows < 2)
-            throw std::runtime_error("buildPyramid: image too small");
-        const int newWidth  = std::max(1, blurred.cols / 2);
-        const int newHeight = std::max(1, blurred.rows / 2);
-        cv::Mat curr(newHeight, newWidth, CV_32FC1);
-        for (int y = 0; y < newHeight; ++y)
-        {
-            float* row = curr.ptr<float>(y);
-            for (int x = 0; x < newWidth; ++x)
-            {
-                row[x] = blurred.at<float>(2 * y, 2 * x);
-            }
-        }
-        pyr.push_back(curr);
-    }
-    return pyr;
-}
-
-
 // Sobel 3x3 gradients for CV_32FC1
 static void computeGradients(const cv::Mat& imgGrayF, cv::Mat& Ix, cv::Mat& Iy)
 {
@@ -329,62 +296,7 @@ static bool trackPointOneLevel(
     return success;
 }
 
-static bool trackPointPyramidal(
-    const std::vector<cv::Mat>& pyrPrev,
-    const std::vector<cv::Mat>& pyrCurr,
-    const std::vector<cv::Mat>& pyrIx,
-    const std::vector<cv::Mat>& pyrIy,
-    const cv::Point2f& ptPrev,
-    cv::Point2f& ptCurr,
-    const int winSize,
-    const int maxIters,
-    const float eps,
-    float& finalErr
-) {
-    if (pyrPrev.empty() || pyrCurr.empty() || pyrIx.empty() || pyrIy.empty())
-        throw std::runtime_error("trackPointPyramidal: empty pyramid");
-    if (pyrPrev.size() != pyrCurr.size() ||
-        pyrPrev.size() != pyrIx.size() ||
-        pyrPrev.size() != pyrIy.size())
-        throw std::runtime_error("trackPointPyramidal: pyramid size mismatch");
-    const int maxLevel = static_cast<int>(pyrPrev.size()) - 1;
-    cv::Point2f d = ptCurr - ptPrev;
-    d *= 1.0f / static_cast<float>(1 << maxLevel);
-    bool success = false;
-    finalErr = -1.0f;
-    for (int level = maxLevel; level >= 0; --level) {
-        const float scale = 1.0f / static_cast<float>(1 << level);
-        const cv::Point2f ptPrevL = ptPrev * scale;
-        cv::Point2f ptCurrL = ptPrevL + d;
-        float errL = -1.0f;
-        const bool ok = trackPointOneLevel(
-            pyrPrev[level],
-            pyrCurr[level],
-            pyrIx[level],
-            pyrIy[level],
-            ptPrevL,
-            ptCurrL,
-            winSize,
-            maxIters,
-            eps,
-            errL
-        );
-        if (!ok) {
-            finalErr = -1.0f;
-            return false;
-        }
-        d = ptCurrL - ptPrevL;
-        finalErr = errL;
-        success = true;
-        if (level > 0) {
-            d *= 2.0f;
-        }
-    }
-    ptCurr = ptPrev + d;
-    return success;
-}
-
-static void trackPointsPyramidalLK(
+static void trackPointsLKOneLevel(
     const cv::Mat& imgPrevGray,
     const cv::Mat& imgCurrGray,
     const std::vector<cv::Point2f>& pts0,
@@ -392,31 +304,31 @@ static void trackPointsPyramidalLK(
     std::vector<uchar>& status,
     std::vector<float>& err,
     const int winSize = 9,
-    const int maxLevel = 3,
     const int maxIters = 10,
     const float eps = 1e-3f
 ) {
     if (imgPrevGray.empty() || imgCurrGray.empty())
-        throw std::runtime_error("trackPointsPyramidalLK: empty input image");
-    if (maxLevel < 0)
-        throw std::runtime_error("trackPointsPyramidalLK: maxLevel must be >= 0");
-    const std::vector<cv::Mat> pyrPrev = buildPyramid(imgPrevGray, maxLevel);
-    const std::vector<cv::Mat> pyrCurr = buildPyramid(imgCurrGray, maxLevel);
-    std::vector<cv::Mat> pyrIx(maxLevel + 1), pyrIy(maxLevel + 1);
-    for (int l = 0; l <= maxLevel; ++l) {
-        computeGradients(pyrCurr[l], pyrIx[l], pyrIy[l]);
-    }
+        throw std::runtime_error("trackPointsLKOneLevel: empty input image");
+
+    const cv::Mat prevF = toFloatGray(imgPrevGray);
+    const cv::Mat currF = toFloatGray(imgCurrGray);
+
+    cv::Mat IxCurr, IyCurr;
+    computeGradients(currF, IxCurr, IyCurr);
+
     pts1.resize(pts0.size());
     status.assign(pts0.size(), 0);
     err.assign(pts0.size(), -1.0f);
+
     for (size_t i = 0; i < pts0.size(); ++i) {
         cv::Point2f trackedPt = pts0[i];
         float trackErr = -1.0f;
-        const bool ok = trackPointPyramidal(
-            pyrPrev,
-            pyrCurr,
-            pyrIx,
-            pyrIy,
+
+        const bool ok = trackPointOneLevel(
+            prevF,
+            currF,
+            IxCurr,
+            IyCurr,
             pts0[i],
             trackedPt,
             winSize,
@@ -424,11 +336,13 @@ static void trackPointsPyramidalLK(
             eps,
             trackErr
         );
+
         pts1[i] = trackedPt;
         status[i] = ok ? 1 : 0;
         err[i] = trackErr;
     }
 }
+
 
 int main() {
     cv::VideoCapture cap("../IMG_4273.MOV");
@@ -436,80 +350,85 @@ int main() {
         std::cerr << "Cannot open video source\n";
         return 1;
     }
+
     cv::Mat prevFrame;
     if (!cap.read(prevFrame) || prevFrame.empty()) {
         std::cerr << "Failed to read first frame from video." << std::endl;
         return 1;
     }
+
     cv::Mat prevGray;
     cv::cvtColor(prevFrame, prevGray, cv::COLOR_BGR2GRAY);
+
     std::vector<cv::Point2f> ptsPrev;
-    cv::goodFeaturesToTrack(prevGray,ptsPrev,100, 0.01,10.0);
+    cv::goodFeaturesToTrack(prevGray, ptsPrev, 300, 0.01, 10.0);
+
     if (ptsPrev.empty()) {
         std::cerr << "No features found in the first frame." << std::endl;
         return 1;
     }
+
     while (true) {
         cv::Mat currFrame;
         if (!cap.read(currFrame) || currFrame.empty()) {
             break;
         }
+
         cv::Mat currGray;
         cv::cvtColor(currFrame, currGray, cv::COLOR_BGR2GRAY);
+
         std::vector<cv::Point2f> ptsCurr;
         std::vector<uchar> status;
         std::vector<float> err;
+
         try {
             auto t1 = std::chrono::high_resolution_clock::now();
-            trackPointsPyramidalLK(prevGray,currGray,ptsPrev,ptsCurr,status,err,9,3,10,1e-3f);
+
+            trackPointsLKOneLevel(
+                prevGray,
+                currGray,
+                ptsPrev,
+                ptsCurr,
+                status,
+                err,
+                9,
+                10,
+                1e-3f
+            );
+
             auto t2 = std::chrono::high_resolution_clock::now();
             double ms = std::chrono::duration<double, std::milli>(t2 - t1).count();
             std::cout << "Tracking time: " << ms << " ms" << std::endl;
+
         } catch (const std::exception& e) {
             std::cerr << "Tracking error: " << e.what() << std::endl;
             return 1;
         }
 
         cv::Mat vis = currFrame.clone();
+
         std::vector<cv::Point2f> goodCurr;
-        std::vector<cv::Point2f> goodPrev;
         for (size_t i = 0; i < ptsPrev.size(); ++i) {
             if (!status[i]) continue;
+
             const cv::Point2f& p0 = ptsPrev[i];
             const cv::Point2f& p1 = ptsCurr[i];
+
             cv::circle(vis, p1, 3, cv::Scalar(0, 255, 0), -1);
             cv::line(vis, p0, p1, cv::Scalar(0, 255, 0), 1);
-            goodPrev.push_back(p0);
+
             goodCurr.push_back(p1);
         }
 
-        // cv::putText(
-        //     vis,
-        //     "Tracked points: " + std::to_string(goodCurr.size()),
-        //     cv::Point(20, 30),
-        //     cv::FONT_HERSHEY_SIMPLEX,
-        //     0.8,
-        //     cv::Scalar(0, 0, 255),
-        //     2
-        // );
-
-        cv::imshow("Pyramidal LK Tracking", vis);
-
+        cv::imshow("One-Level LK Tracking", vis);
         cv::waitKey(1);
 
         if (goodCurr.size() < 50) {
-            cv::goodFeaturesToTrack(
-                currGray,
-                goodCurr,
-                100,
-                0.01,
-                10.0
-            );
+            cv::goodFeaturesToTrack(currGray, goodCurr, 300, 0.01, 10.0);
         }
 
         prevGray = currGray.clone();
         ptsPrev = goodCurr;
-
 
         if (ptsPrev.empty()) {
             std::cerr << "No points left to track." << std::endl;
