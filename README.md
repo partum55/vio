@@ -162,3 +162,5 @@ The project uses **CMake**.
 
 ```bash
 ./compile.sh
+```
+
