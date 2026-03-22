@@ -2,6 +2,8 @@
 #include "keypoints/shi_tomasi.hpp"
 #include "keypoints/sobel.hpp"
 
+#include <opencv2/imgproc.hpp>
+
 #include <algorithm>
 #include <cmath>
 

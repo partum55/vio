@@ -1,47 +1,68 @@
-# Prerequisites
-*.d
+# IDE
+.idea/
 
-# Compiled Object files
-*.slo
-*.lo
+# CLion / CMake build trees
+build/
+cmake-build-*/
+out/
+
+# In-source CMake / Make artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+Makefile
+
+# Native build outputs
+*.d
 *.o
 *.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
+*.lo
+*.slo
 *.lai
 *.la
 *.a
 *.lib
-
-# Executables
+*.so
+*.dylib
+*.dll
 *.exe
 *.out
 *.app
-
-# debug information files
+*.ilk
+*.pdb
 *.dwo
+*.gch
+*.pch
+*.mod
+*.smod
 
-.idea/
-build/
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+.venv/
 python/.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local run artifacts
+.run_logs/
+*.log
+*.tmp
+
+# Common local outputs
+*.rrd
+/first_view.mp4
+/output.mp4
+/traj.tum
+
+# OS files
+.DS_Store
+Thumbs.db
