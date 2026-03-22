@@ -1,2 +1,1 @@
 rerun-sdk
-opencv-python

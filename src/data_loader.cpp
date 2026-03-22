@@ -1,7 +1,6 @@
-#include "core/data_loader.h"
+#include "vio/data_loader.h"
 
 #include <Eigen/Geometry>
-
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -20,26 +19,17 @@ Trajectory loadTrajectoryTUM(const std::string& filepath) {
     int line_num = 0;
     while (std::getline(file, line)) {
         ++line_num;
-        if (line.empty() || line[0] == '#') {
-            continue;
-        }
+        if (line.empty() || line[0] == '#') continue;
 
         std::istringstream iss(line);
-        double ts;
-        double tx;
-        double ty;
-        double tz;
-        double qx;
-        double qy;
-        double qz;
-        double qw;
+        double ts, tx, ty, tz, qx, qy, qz, qw;
         if (!(iss >> ts >> tx >> ty >> tz >> qx >> qy >> qz >> qw)) {
             std::cerr << "Warning: skipping malformed line " << line_num
                       << " in " << filepath << "\n";
             continue;
         }
 
-        Eigen::Quaterniond q(qw, qx, qy, qz);
+        Eigen::Quaterniond q(qw, qx, qy, qz); // Eigen takes w-first
         q.normalize();
 
         CameraPose pose;
@@ -67,14 +57,10 @@ PointCloud loadPointCloudXYZ(const std::string& filepath) {
     int line_num = 0;
     while (std::getline(file, line)) {
         ++line_num;
-        if (line.empty() || line[0] == '#') {
-            continue;
-        }
+        if (line.empty() || line[0] == '#') continue;
 
         std::istringstream iss(line);
-        double x;
-        double y;
-        double z;
+        double x, y, z;
         if (!(iss >> x >> y >> z)) {
             std::cerr << "Warning: skipping malformed line " << line_num
                       << " in " << filepath << "\n";
@@ -84,9 +70,7 @@ PointCloud loadPointCloudXYZ(const std::string& filepath) {
         Point3D point;
         point.position = Eigen::Vector3d(x, y, z);
 
-        double r;
-        double g;
-        double b;
+        double r, g, b;
         if (iss >> r >> g >> b) {
             point.color = Eigen::Vector3f(
                 static_cast<float>(r / 255.0),

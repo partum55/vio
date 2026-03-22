@@ -1,7 +1,6 @@
 #pragma once
 
-#include "core/dataset.h"
-#include "core/types.h"
+#include "vio/types.h"
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -31,8 +30,7 @@ public:
     RerunStreamClient& operator=(const RerunStreamClient&) = delete;
 
     bool connect(const std::string& host, int port, int retries = 20, int retry_delay_ms = 250);
-    bool sendInit(const Dataset& dataset);
-    bool sendSyntheticInit();
+    bool sendInit(const std::string& scene_name);
     bool sendPointCloud(const PointCloud& cloud, std::size_t max_points = 2500);
     bool sendSample(const StreamSample& sample);
     bool sendDone(std::size_t num_samples);

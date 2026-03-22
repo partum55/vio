@@ -1,4 +1,4 @@
-#include "core/rerun_stream.h"
+#include "vio/rerun_stream.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -6,7 +6,8 @@
 #include <unistd.h>
 
 #include <chrono>
-#include <cstring>
+#include <cmath>
+#include <cstdint>
 #include <sstream>
 #include <thread>
 
@@ -47,23 +48,19 @@ bool RerunStreamClient::connect(const std::string& host, int port, int retries, 
     return false;
 }
 
-bool RerunStreamClient::sendInit(const Dataset& dataset) {
+bool RerunStreamClient::sendInit(const std::string& scene_name) {
     std::ostringstream json;
     json << "{"
          << "\"type\":\"init\","
-         << "\"dataset_root\":\"" << escapeJson(dataset.root.string()) << "\","
-         << "\"image_width\":" << dataset.camera.width << ","
-         << "\"image_height\":" << dataset.camera.height << ","
-         << "\"fx\":" << dataset.camera.fx << ","
-         << "\"fy\":" << dataset.camera.fy << ","
-         << "\"cx\":" << dataset.camera.cx << ","
-         << "\"cy\":" << dataset.camera.cy
+         << "\"dataset_root\":\"" << escapeJson(scene_name) << "\","
+         << "\"image_width\":1280,"
+         << "\"image_height\":720,"
+         << "\"fx\":700.0,"
+         << "\"fy\":700.0,"
+         << "\"cx\":640.0,"
+         << "\"cy\":360.0"
          << "}";
     return sendLine(json.str());
-}
-
-bool RerunStreamClient::sendSyntheticInit() {
-    return sendLine("{\"type\":\"init\",\"dataset_root\":\"synthetic_demo\",\"image_width\":1280,\"image_height\":720,\"fx\":700.0,\"fy\":700.0,\"cx\":640.0,\"cy\":360.0}");
 }
 
 bool RerunStreamClient::sendPointCloud(const PointCloud& cloud, std::size_t max_points) {
@@ -79,18 +76,18 @@ bool RerunStreamClient::sendPointCloud(const PointCloud& cloud, std::size_t max_
         }
         json << vectorToJson(cloud[i].position);
     }
+
     json << "],\"colors\":[";
     for (std::size_t i = 0; i < limit; ++i) {
         if (i > 0) {
             json << ",";
         }
         json << "["
-             << static_cast<int>(std::round(cloud[i].color.x() * 255.0f)) << ","
-             << static_cast<int>(std::round(cloud[i].color.y() * 255.0f)) << ","
-             << static_cast<int>(std::round(cloud[i].color.z() * 255.0f)) << "]";
+             << static_cast<int>(std::lround(cloud[i].color.x() * 255.0f)) << ","
+             << static_cast<int>(std::lround(cloud[i].color.y() * 255.0f)) << ","
+             << static_cast<int>(std::lround(cloud[i].color.z() * 255.0f)) << "]";
     }
     json << "]}";
-
     return sendLine(json.str());
 }
 
@@ -138,7 +135,6 @@ bool RerunStreamClient::sendLine(const std::string& line) {
     const std::string payload = line + "\n";
     const char* data = payload.data();
     std::size_t total_sent = 0;
-
     while (total_sent < payload.size()) {
         const ssize_t sent = ::send(socket_fd_, data + total_sent, payload.size() - total_sent, 0);
         if (sent <= 0) {
@@ -147,7 +143,6 @@ bool RerunStreamClient::sendLine(const std::string& line) {
         }
         total_sent += static_cast<std::size_t>(sent);
     }
-
     return true;
 }
 

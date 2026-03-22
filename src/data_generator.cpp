@@ -1,4 +1,4 @@
-#include "core/data_generator.h"
+#include "vio/data_generator.h"
 
 #include <Eigen/Geometry>
 
@@ -15,14 +15,16 @@ Trajectory generateTrajectory(const GeneratorConfig& config) {
         double t = static_cast<double>(i) / (config.num_poses - 1);
         double angle = 2.0 * M_PI * config.helix_turns * t;
 
+        // Position on helix: circle in XZ, rising in Y
         double x = config.helix_radius * std::cos(angle);
         double z = config.helix_radius * std::sin(angle);
         double y = config.helix_height * t;
 
         Eigen::Vector3d pos(x, y, z);
-        Eigen::Vector3d target(0.0, config.helix_height * 0.5, 0.0);
+        Eigen::Vector3d target(0.0, config.helix_height * 0.5, 0.0); // look toward center
         Eigen::Vector3d up(0.0, 1.0, 0.0);
 
+        // Build rotation: camera looks from pos toward target
         Eigen::Vector3d forward = (target - pos).normalized();
         Eigen::Vector3d right = forward.cross(up).normalized();
         Eigen::Vector3d cam_up = right.cross(forward).normalized();
@@ -30,7 +32,7 @@ Trajectory generateTrajectory(const GeneratorConfig& config) {
         Eigen::Matrix4d T_wc = Eigen::Matrix4d::Identity();
         T_wc.block<3, 1>(0, 0) = right;
         T_wc.block<3, 1>(0, 1) = cam_up;
-        T_wc.block<3, 1>(0, 2) = -forward;
+        T_wc.block<3, 1>(0, 2) = -forward; // camera looks along -Z
         T_wc.block<3, 1>(0, 3) = pos;
 
         CameraPose pose;
@@ -55,10 +57,9 @@ PointCloud generatePointCloud(const GeneratorConfig& config) {
         double y = dist_y(rng);
         double z = dist_xz(rng);
 
+        // Height-based coloring: blue (low) -> green (mid) -> red (high)
         float t = static_cast<float>(y / config.cloud_height);
-        float r;
-        float g;
-        float b;
+        float r, g, b;
         if (t < 0.5f) {
             float s = t * 2.0f;
             r = 0.0f;

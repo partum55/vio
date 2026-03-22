@@ -26,11 +26,16 @@ def build_grid_segments(extent: int = 10, step: int = 1) -> list[list[list[float
 
 def try_import_runtime():
     try:
-        import cv2  # type: ignore
         import rerun as rr  # type: ignore
     except Exception as exc:  # pragma: no cover
         print(f"Receiver dependency error: {exc}", file=sys.stderr)
         return None, None
+
+    try:
+        import cv2  # type: ignore
+    except Exception:  # pragma: no cover
+        cv2 = None
+
     return rr, cv2
 
 
@@ -68,9 +73,9 @@ def run_server(args: argparse.Namespace) -> int:
 
                 if msg_type == "init":
                     rr.log(
-                        "world/dataset",
+                        "world/scene",
                         rr.TextDocument(
-                            f"Dataset: {message.get('dataset_root', '')}\n"
+                            f"Scene: {message.get('dataset_root', '')}\n"
                             f"Resolution: {message.get('image_width')}x{message.get('image_height')}\n"
                             f"Intrinsics: fx={message.get('fx')}, fy={message.get('fy')}, "
                             f"cx={message.get('cx')}, cy={message.get('cy')}"
@@ -136,7 +141,7 @@ def run_server(args: argparse.Namespace) -> int:
                     )
 
                     image_path = Path(message.get("image_path", ""))
-                    if image_path.is_file():
+                    if cv2 is not None and image_path.is_file():
                         image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
                         if image is not None:
                             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -146,7 +151,7 @@ def run_server(args: argparse.Namespace) -> int:
                 if msg_type == "done":
                     rr.log(
                         "world/status",
-                        rr.TextDocument(f"Processing finished. Frames: {message.get('num_samples', 0)}"),
+                        rr.TextDocument(f"Streaming finished. Frames: {message.get('num_samples', 0)}"),
                     )
                     break
 
