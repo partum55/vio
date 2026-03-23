@@ -10,9 +10,9 @@ add_executable(main_app main.cpp)
 target_link_libraries(main_app PRIVATE ${OpenCV_LIBS})
 
 # executable для algo.cpp
-add_executable(algo_app algo.cpp)
-target_link_libraries(algo_app PRIVATE ${OpenCV_LIBS})
+add_executable(algo algo.cpp)
+target_link_libraries(algo PRIVATE ${OpenCV_LIBS})
 
-# executable для algo_withoutpyr.cpp
-add_executable(algo_without algo_withoutpyr.cpp)
-target_link_libraries(algo_without PRIVATE ${OpenCV_LIBS})
+# executable для algo_with_cam0.cpp
+add_executable(algo_with_cam0 algo_with_cam0.cpp)
+target_link_libraries(algo_with_cam0 PRIVATE ${OpenCV_LIBS})
