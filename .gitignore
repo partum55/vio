@@ -1,0 +1,22 @@
+cam0/
+# ==== CMake / build ====
+cmake-build-*/
+build/
+CMakeFiles/
+CMakeCache.txt
+*.cmake
+Makefile
+
+# ==== CLion ====
+.idea/
+
+# ==== binaries ====
+*.out
+*.exe
+*.app
+
+# ==== logs ====
+*.log
+
+# ==== OS ====
+.DS_Store
