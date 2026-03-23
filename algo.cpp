@@ -5,6 +5,8 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <fstream>
+#include <chrono>
 
 // Bilinear = двовимірна лінійна інтерполяція.
 static float getPixelBilinear(const cv::Mat& img, const float x, const float y)
@@ -430,94 +432,237 @@ static void trackPointsPyramidalLK(
     }
 }
 
-int main() {
-    cv::VideoCapture cap("../IMG_4273.MOV");
+struct Track
+{
+    int id;
+    cv::Point2f pt;
+    std::vector<cv::Point2f> history;
+};
+
+static float pointDistance(const cv::Point2f& a, const cv::Point2f& b)
+{
+    const float dx = a.x - b.x;
+    const float dy = a.y - b.y;
+    return std::sqrt(dx * dx + dy * dy);
+}
+
+static bool isFarFromExisting(
+    const cv::Point2f& p,
+    const std::vector<Track>& tracks,
+    const float minDist
+) {
+    for (const auto& t : tracks) {
+        if (pointDistance(p, t.pt) < minDist) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void addNewTracks(
+    const cv::Mat& gray,
+    std::vector<Track>& tracks,
+    int& nextTrackId,
+    const int maxCorners = 100,
+    const double qualityLevel = 0.01,
+    const double minDistance = 10.0
+) {
+    std::vector<cv::Point2f> detected;
+    cv::goodFeaturesToTrack(gray, detected, maxCorners, qualityLevel, minDistance);
+
+    for (const auto& p : detected) {
+        if (isFarFromExisting(p, tracks, static_cast<float>(minDistance))) {
+            Track t;
+            t.id = nextTrackId++;
+            t.pt = p;
+            t.history.push_back(p);
+            tracks.push_back(t);
+        }
+    }
+}
+
+static cv::Mat drawTrackingVisualization(
+    const cv::Mat& frame,
+    const std::vector<Track>& tracks,
+    const int tailLength = 15
+) {
+    cv::Mat vis = frame.clone();
+
+    for (const auto& t : tracks) {
+        const int histSize = static_cast<int>(t.history.size());
+        const int startIdx = std::max(0, histSize - tailLength);
+
+        for (int i = startIdx + 1; i < histSize; ++i) {
+            cv::line(vis, t.history[i - 1], t.history[i], cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+        }
+
+        cv::circle(vis, t.pt, 3, cv::Scalar(0, 0, 255), -1, cv::LINE_AA);
+    }
+
+    cv::putText(
+        vis,
+        "Active tracks: " + std::to_string(tracks.size()),
+        cv::Point(20, 30),
+        cv::FONT_HERSHEY_SIMPLEX,
+        0.8,
+        cv::Scalar(255, 255, 255),
+        2,
+        cv::LINE_AA
+    );
+
+    return vis;
+}
+
+int main()
+{
+    const std::string inputVideo  = "../IMG_4273.MOV";
+    const std::string outputVideo = "tracking_visualization.mp4";
+    const std::string outputCsv   = "tracking.csv";
+
+    cv::VideoCapture cap(inputVideo);
     if (!cap.isOpened()) {
         std::cerr << "Cannot open video source\n";
         return 1;
     }
+
+    const double fps = cap.get(cv::CAP_PROP_FPS);
+    const int width  = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH));
+    const int height = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT));
+
+    cv::VideoWriter writer(
+        outputVideo,
+        cv::VideoWriter::fourcc('m', 'p', '4', 'v'),
+        (fps > 0.0 ? fps : 25.0),
+        cv::Size(width, height)
+    );
+
+    if (!writer.isOpened()) {
+        std::cerr << "Cannot open output video writer\n";
+        return 1;
+    }
+
+    std::ofstream csv(outputCsv);
+    if (!csv.is_open()) {
+        std::cerr << "Cannot open CSV output file\n";
+        return 1;
+    }
+
+    csv << "frame_idx,point_id,x,y,status\n";
+
     cv::Mat prevFrame;
     if (!cap.read(prevFrame) || prevFrame.empty()) {
-        std::cerr << "Failed to read first frame from video." << std::endl;
+        std::cerr << "Failed to read first frame from video.\n";
         return 1;
     }
+
     cv::Mat prevGray;
     cv::cvtColor(prevFrame, prevGray, cv::COLOR_BGR2GRAY);
-    std::vector<cv::Point2f> ptsPrev;
-    cv::goodFeaturesToTrack(prevGray,ptsPrev,100, 0.01,10.0);
-    if (ptsPrev.empty()) {
-        std::cerr << "No features found in the first frame." << std::endl;
+
+    std::vector<cv::Point2f> initialPts;
+    cv::goodFeaturesToTrack(prevGray, initialPts, 100, 0.01, 10.0);
+
+    if (initialPts.empty()) {
+        std::cerr << "No features found in the first frame.\n";
         return 1;
     }
+
+    std::vector<Track> tracks;
+    int nextTrackId = 0;
+
+    for (const auto& p : initialPts) {
+        Track t;
+        t.id = nextTrackId++;
+        t.pt = p;
+        t.history.push_back(p);
+        tracks.push_back(t);
+    }
+
+    int frameIdx = 0;
+
+    for (const auto& t : tracks) {
+        csv << frameIdx << "," << t.id << "," << t.pt.x << "," << t.pt.y << ",1\n";
+    }
+
+    writer.write(drawTrackingVisualization(prevFrame, tracks));
+
     while (true) {
         cv::Mat currFrame;
         if (!cap.read(currFrame) || currFrame.empty()) {
             break;
         }
+
+        ++frameIdx;
+
         cv::Mat currGray;
         cv::cvtColor(currFrame, currGray, cv::COLOR_BGR2GRAY);
+
+        std::vector<cv::Point2f> ptsPrev;
+        ptsPrev.reserve(tracks.size());
+        for (const auto& t : tracks) {
+            ptsPrev.push_back(t.pt);
+        }
+
         std::vector<cv::Point2f> ptsCurr;
         std::vector<uchar> status;
         std::vector<float> err;
+
         try {
             auto t1 = std::chrono::high_resolution_clock::now();
-            trackPointsPyramidalLK(prevGray,currGray,ptsPrev,ptsCurr,status,err,9,3,10,1e-3f);
+            trackPointsPyramidalLK(prevGray, currGray, ptsPrev, ptsCurr, status, err, 9, 3, 10, 1e-3f);
             auto t2 = std::chrono::high_resolution_clock::now();
             double ms = std::chrono::duration<double, std::milli>(t2 - t1).count();
-            std::cout << "Tracking time: " << ms << " ms" << std::endl;
+            std::cout << "Frame " << frameIdx << " tracking time: " << ms << " ms\n";
         } catch (const std::exception& e) {
             std::cerr << "Tracking error: " << e.what() << std::endl;
             return 1;
         }
 
-        cv::Mat vis = currFrame.clone();
-        std::vector<cv::Point2f> goodCurr;
-        std::vector<cv::Point2f> goodPrev;
-        for (size_t i = 0; i < ptsPrev.size(); ++i) {
-            if (!status[i]) continue;
-            const cv::Point2f& p0 = ptsPrev[i];
-            const cv::Point2f& p1 = ptsCurr[i];
-            cv::circle(vis, p1, 3, cv::Scalar(0, 255, 0), -1);
-            cv::line(vis, p0, p1, cv::Scalar(0, 255, 0), 1);
-            goodPrev.push_back(p0);
-            goodCurr.push_back(p1);
+        std::vector<Track> newTracks;
+        newTracks.reserve(tracks.size());
+
+        for (size_t i = 0; i < tracks.size(); ++i) {
+            if (status[i]) {
+                Track updated = tracks[i];
+                updated.pt = ptsCurr[i];
+                updated.history.push_back(ptsCurr[i]);
+                newTracks.push_back(updated);
+
+                csv << frameIdx << "," << updated.id << "," << updated.pt.x << "," << updated.pt.y << ",1\n";
+            } else {
+                csv << frameIdx << "," << tracks[i].id << ",-1,-1,0\n";
+            }
         }
 
-        // cv::putText(
-        //     vis,
-        //     "Tracked points: " + std::to_string(goodCurr.size()),
-        //     cv::Point(20, 30),
-        //     cv::FONT_HERSHEY_SIMPLEX,
-        //     0.8,
-        //     cv::Scalar(0, 0, 255),
-        //     2
-        // );
+        tracks = std::move(newTracks);
 
-        cv::imshow("Pyramidal LK Tracking", vis);
-
-        cv::waitKey(1);
-
-        if (goodCurr.size() < 50) {
-            cv::goodFeaturesToTrack(
-                currGray,
-                goodCurr,
-                100,
-                0.01,
-                10.0
-            );
+        if (tracks.size() < 50) {
+            addNewTracks(currGray, tracks, nextTrackId, 100, 0.01, 10.0);
         }
+
+        for (const auto& t : tracks) {
+            if (t.history.size() == 1) {
+                csv << frameIdx << "," << t.id << "," << t.pt.x << "," << t.pt.y << ",1\n";
+            }
+        }
+
+        cv::Mat vis = drawTrackingVisualization(currFrame, tracks, 15);
+        writer.write(vis);
 
         prevGray = currGray.clone();
-        ptsPrev = goodCurr;
 
-
-        if (ptsPrev.empty()) {
-            std::cerr << "No points left to track." << std::endl;
+        if (tracks.empty()) {
+            std::cerr << "No points left to track.\n";
             break;
         }
     }
 
     cap.release();
-    cv::destroyAllWindows();
+    writer.release();
+    csv.close();
+
+    std::cout << "Done.\n";
+    std::cout << "Saved video: " << outputVideo << "\n";
+    std::cout << "Saved tracking: " << outputCsv << "\n";
+
     return 0;
 }
