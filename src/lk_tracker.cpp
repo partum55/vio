@@ -1,15 +1,11 @@
-#include <opencv2/opencv.hpp>
-#include <filesystem>
+#include "lk_tracker.hpp"
+
 #include <stdexcept>
-#include <iostream>
-#include <vector>
-#include <cmath>
 #include <algorithm>
-#include <fstream>
-#include <chrono>
+#include <cmath>
 
 // Bilinear = двовимірна лінійна інтерполяція.
-static float getPixelBilinear(const cv::Mat& img, const float x, const float y)
+float getPixelBilinear(const cv::Mat& img, const float x, const float y)
 {
     if (img.type() != CV_32FC1)
         throw std::runtime_error("getPixelBilinear: image must be CV_32FC1");
@@ -41,7 +37,7 @@ static float getPixelBilinear(const cv::Mat& img, const float x, const float y)
 }
 
 // щоб був менший residual в основному з [0,255] -> [0,1]
-static cv::Mat toFloatGray(const cv::Mat& gray) {
+cv::Mat toFloatGray(const cv::Mat& gray) {
     if (gray.empty()) throw std::runtime_error("toFloatGray: empty image");
     if (gray.channels() != 1) throw std::runtime_error("toFloatGray: expected 1-channel image");
 
@@ -56,14 +52,14 @@ static cv::Mat toFloatGray(const cv::Mat& gray) {
     return f;
 }
 
-static int border_replicate(const int val, const int min, const int max)
+// TODO: можна перейменувати min max clip і оптимізувати без іф щоб було
+int border_replicate(const int val, const int min, const int max)
 {
-    if (val < min) return min;
-    if (val > max) return max;
-    return val;
+    return std::clamp(val, min, max);
 }
 
-static cv::Mat gaussianBlurCustomFloat(const cv::Mat& image)
+// TODO: просто конволюцію реалізувати передаємо зображення і розміри спробуват окрему функцію щоб ми робили
+cv::Mat gaussianBlurCustomFloat(const cv::Mat& image)
 {
     if (image.empty())
         throw std::runtime_error("gaussianBlurCustomFloat: empty image");
@@ -78,17 +74,44 @@ static cv::Mat gaussianBlurCustomFloat(const cv::Mat& image)
 
     cv::Mat result(image.rows, image.cols, CV_32FC1, cv::Scalar(0));
 
-    for (int y = 0; y < image.rows; ++y) {
-        for (int x = 0; x < image.cols; ++x) {
+    for (int y = 1; y < image.rows - 1; ++y) {
+        for (int x = 1; x < image.cols - 1; ++x) {
+
             float sum = 0.0f;
 
             for (int ky = -1; ky <= 1; ++ky) {
+                const float* row = image.ptr<float>(y + ky);
+
                 for (int kx = -1; kx <= 1; ++kx) {
+                    const float pixel = row[x + kx];
+                    const int coeff1 = kernel[ky + 1][kx + 1];
+                    sum += pixel * static_cast<float>(coeff1);
+                }
+            }
+            result.at<float>(y, x) = sum / 16.0f;
+        }
+    }
+
+    for (int y = 0; y < image.rows; ++y) {
+        for (int x = 0; x < image.cols; ++x) {
+
+            if (y > 0 && y < image.rows - 1 &&
+                x > 0 && x < image.cols - 1)
+                continue;
+
+            float sum = 0.0f;
+            #pragma unroll
+            for (int ky = -1; ky <= 1; ++ky) {
+                #pragma unroll
+                for (int kx = -1; kx <= 1; ++kx) {
+
                     const int yy = border_replicate(y + ky, 0, image.rows - 1);
                     const int xx = border_replicate(x + kx, 0, image.cols - 1);
+
                     const float pixel = image.at<float>(yy, xx);
-                    const int coeff = kernel[ky + 1][kx + 1];
-                    sum += pixel * static_cast<float>(coeff);
+                    const int coeff2 = kernel[ky + 1][kx + 1];
+
+                    sum += pixel * static_cast<float>(coeff2);
                 }
             }
             result.at<float>(y, x) = sum / 16.0f;
@@ -98,7 +121,7 @@ static cv::Mat gaussianBlurCustomFloat(const cv::Mat& image)
 }
 
 
-static std::vector<cv::Mat> buildPyramid(const cv::Mat& imgGray, const int levels)
+std::vector<cv::Mat> buildPyramid(const cv::Mat& imgGray, const int levels)
 {
     if (levels < 0)
         throw std::runtime_error("buildPyramid: levels must be >= 0");
@@ -131,7 +154,7 @@ static std::vector<cv::Mat> buildPyramid(const cv::Mat& imgGray, const int level
 
 
 // Sobel 3x3 gradients for CV_32FC1
-static void computeGradients(const cv::Mat& imgGrayF, cv::Mat& Ix, cv::Mat& Iy)
+void computeGradients(const cv::Mat& imgGrayF, cv::Mat& Ix, cv::Mat& Iy)
 {
     if (imgGrayF.empty()) throw std::runtime_error("computeGradients: empty image");
     if (imgGrayF.type() != CV_32FC1) throw std::runtime_error("computeGradients: expected CV_32FC1");
@@ -177,7 +200,7 @@ static void computeGradients(const cv::Mat& imgGrayF, cv::Mat& Ix, cv::Mat& Iy)
 }
 
 // Витягує квадратний patch (2r+1)x(2r+1) навколо (cx,cy). false, якщо patch не влазить (з урахуванням bilinear).
-static bool extractPatch(const cv::Mat& imgF, const float cx, const float cy, const int r, cv::Mat& patch)
+bool extractPatch(const cv::Mat& imgF, const float cx, const float cy, const int r, cv::Mat& patch)
 {
     if (imgF.empty())
         throw std::runtime_error("extractPatch: empty image");
@@ -205,7 +228,7 @@ static bool extractPatch(const cv::Mat& imgF, const float cx, const float cy, co
 }
 
 // Обчислює H (2x2), b (2x1) для translation LK на одному рівні. false, якщо ми виходимо за межі (неможливо білінійно семплити).
-static bool computeLKSystemTranslation(
+bool computeLKSystemTranslation(
     const cv::Mat& patchT,
     const cv::Mat& imgCurrF,
     const cv::Mat& IxCurrF,
@@ -261,7 +284,7 @@ static bool computeLKSystemTranslation(
     return true;
 }
 
-static bool solve2x2(const cv::Matx22f& H,const cv::Vec2f& val, cv::Vec2f& delta, const float minDet = 1e-6f)
+bool solve2x2(const cv::Matx22f& H,const cv::Vec2f& val, cv::Vec2f& delta, const float minDet)
 {
     const float a = H(0,0);
     const float b = H(0,1);
@@ -279,7 +302,7 @@ static bool solve2x2(const cv::Matx22f& H,const cv::Vec2f& val, cv::Vec2f& delta
     return true;
 }
 
-static bool trackPointOneLevel(
+bool trackPointOneLevel(
     const cv::Mat& imgPrevF,
     const cv::Mat& imgCurrF,
     const cv::Mat& IxCurrF,
@@ -331,7 +354,7 @@ static bool trackPointOneLevel(
     return success;
 }
 
-static bool trackPointPyramidal(
+bool trackPointPyramidal(
     const std::vector<cv::Mat>& pyrPrev,
     const std::vector<cv::Mat>& pyrCurr,
     const std::vector<cv::Mat>& pyrIx,
@@ -386,17 +409,17 @@ static bool trackPointPyramidal(
     return success;
 }
 
-static void trackPointsPyramidalLK(
+void trackPointsPyramidalLK(
     const cv::Mat& imgPrevGray,
     const cv::Mat& imgCurrGray,
     const std::vector<cv::Point2f>& pts0,
     std::vector<cv::Point2f>& pts1,
     std::vector<uchar>& status,
     std::vector<float>& err,
-    const int winSize = 9,
-    const int maxLevel = 3,
-    const int maxIters = 10,
-    const float eps = 1e-3f
+    const int winSize,
+    const int maxLevel,
+    const int maxIters,
+    const float eps
 ) {
     if (imgPrevGray.empty() || imgCurrGray.empty())
         throw std::runtime_error("trackPointsPyramidalLK: empty input image");
@@ -430,239 +453,4 @@ static void trackPointsPyramidalLK(
         status[i] = ok ? 1 : 0;
         err[i] = trackErr;
     }
-}
-
-struct Track
-{
-    int id;
-    cv::Point2f pt;
-    std::vector<cv::Point2f> history;
-};
-
-static float pointDistance(const cv::Point2f& a, const cv::Point2f& b)
-{
-    const float dx = a.x - b.x;
-    const float dy = a.y - b.y;
-    return std::sqrt(dx * dx + dy * dy);
-}
-
-static bool isFarFromExisting(
-    const cv::Point2f& p,
-    const std::vector<Track>& tracks,
-    const float minDist
-) {
-    for (const auto& t : tracks) {
-        if (pointDistance(p, t.pt) < minDist) {
-            return false;
-        }
-    }
-    return true;
-}
-
-static void addNewTracks(
-    const cv::Mat& gray,
-    std::vector<Track>& tracks,
-    int& nextTrackId,
-    const int maxCorners = 100,
-    const double qualityLevel = 0.01,
-    const double minDistance = 10.0
-) {
-    std::vector<cv::Point2f> detected;
-    cv::goodFeaturesToTrack(gray, detected, maxCorners, qualityLevel, minDistance);
-
-    for (const auto& p : detected) {
-        if (isFarFromExisting(p, tracks, static_cast<float>(minDistance))) {
-            Track t;
-            t.id = nextTrackId++;
-            t.pt = p;
-            t.history.push_back(p);
-            tracks.push_back(t);
-        }
-    }
-}
-
-static cv::Mat drawTrackingVisualization(
-    const cv::Mat& frame,
-    const std::vector<Track>& tracks,
-    const int tailLength = 15
-) {
-    cv::Mat vis = frame.clone();
-
-    for (const auto& t : tracks) {
-        const int histSize = static_cast<int>(t.history.size());
-        const int startIdx = std::max(0, histSize - tailLength);
-
-        for (int i = startIdx + 1; i < histSize; ++i) {
-            cv::line(vis, t.history[i - 1], t.history[i], cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
-        }
-
-        cv::circle(vis, t.pt, 3, cv::Scalar(0, 0, 255), -1, cv::LINE_AA);
-    }
-
-    cv::putText(
-        vis,
-        "Active tracks: " + std::to_string(tracks.size()),
-        cv::Point(20, 30),
-        cv::FONT_HERSHEY_SIMPLEX,
-        0.8,
-        cv::Scalar(255, 255, 255),
-        2,
-        cv::LINE_AA
-    );
-
-    return vis;
-}
-
-int main()
-{
-    const std::string inputVideo  = "../IMG_4273.MOV";
-    const std::string outputVideo = "tracking_visualization.mp4";
-    const std::string outputCsv   = "tracking.csv";
-
-    cv::VideoCapture cap(inputVideo);
-    if (!cap.isOpened()) {
-        std::cerr << "Cannot open video source\n";
-        return 1;
-    }
-
-    const double fps = cap.get(cv::CAP_PROP_FPS);
-    const int width  = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH));
-    const int height = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT));
-
-    cv::VideoWriter writer(
-        outputVideo,
-        cv::VideoWriter::fourcc('m', 'p', '4', 'v'),
-        (fps > 0.0 ? fps : 25.0),
-        cv::Size(width, height)
-    );
-
-    if (!writer.isOpened()) {
-        std::cerr << "Cannot open output video writer\n";
-        return 1;
-    }
-
-    std::ofstream csv(outputCsv);
-    if (!csv.is_open()) {
-        std::cerr << "Cannot open CSV output file\n";
-        return 1;
-    }
-
-    csv << "frame_idx,point_id,x,y,status\n";
-
-    cv::Mat prevFrame;
-    if (!cap.read(prevFrame) || prevFrame.empty()) {
-        std::cerr << "Failed to read first frame from video.\n";
-        return 1;
-    }
-
-    cv::Mat prevGray;
-    cv::cvtColor(prevFrame, prevGray, cv::COLOR_BGR2GRAY);
-
-    std::vector<cv::Point2f> initialPts;
-    cv::goodFeaturesToTrack(prevGray, initialPts, 100, 0.01, 10.0);
-
-    if (initialPts.empty()) {
-        std::cerr << "No features found in the first frame.\n";
-        return 1;
-    }
-
-    std::vector<Track> tracks;
-    int nextTrackId = 0;
-
-    for (const auto& p : initialPts) {
-        Track t;
-        t.id = nextTrackId++;
-        t.pt = p;
-        t.history.push_back(p);
-        tracks.push_back(t);
-    }
-
-    int frameIdx = 0;
-
-    for (const auto& t : tracks) {
-        csv << frameIdx << "," << t.id << "," << t.pt.x << "," << t.pt.y << ",1\n";
-    }
-
-    writer.write(drawTrackingVisualization(prevFrame, tracks));
-
-    while (true) {
-        cv::Mat currFrame;
-        if (!cap.read(currFrame) || currFrame.empty()) {
-            break;
-        }
-
-        ++frameIdx;
-
-        cv::Mat currGray;
-        cv::cvtColor(currFrame, currGray, cv::COLOR_BGR2GRAY);
-
-        std::vector<cv::Point2f> ptsPrev;
-        ptsPrev.reserve(tracks.size());
-        for (const auto& t : tracks) {
-            ptsPrev.push_back(t.pt);
-        }
-
-        std::vector<cv::Point2f> ptsCurr;
-        std::vector<uchar> status;
-        std::vector<float> err;
-
-        try {
-            auto t1 = std::chrono::high_resolution_clock::now();
-            trackPointsPyramidalLK(prevGray, currGray, ptsPrev, ptsCurr, status, err, 9, 3, 10, 1e-3f);
-            auto t2 = std::chrono::high_resolution_clock::now();
-            double ms = std::chrono::duration<double, std::milli>(t2 - t1).count();
-            std::cout << "Frame " << frameIdx << " tracking time: " << ms << " ms\n";
-        } catch (const std::exception& e) {
-            std::cerr << "Tracking error: " << e.what() << std::endl;
-            return 1;
-        }
-
-        std::vector<Track> newTracks;
-        newTracks.reserve(tracks.size());
-
-        for (size_t i = 0; i < tracks.size(); ++i) {
-            if (status[i]) {
-                Track updated = tracks[i];
-                updated.pt = ptsCurr[i];
-                updated.history.push_back(ptsCurr[i]);
-                newTracks.push_back(updated);
-
-                csv << frameIdx << "," << updated.id << "," << updated.pt.x << "," << updated.pt.y << ",1\n";
-            } else {
-                csv << frameIdx << "," << tracks[i].id << ",-1,-1,0\n";
-            }
-        }
-
-        tracks = std::move(newTracks);
-
-        if (tracks.size() < 50) {
-            addNewTracks(currGray, tracks, nextTrackId, 100, 0.01, 10.0);
-        }
-
-        for (const auto& t : tracks) {
-            if (t.history.size() == 1) {
-                csv << frameIdx << "," << t.id << "," << t.pt.x << "," << t.pt.y << ",1\n";
-            }
-        }
-
-        cv::Mat vis = drawTrackingVisualization(currFrame, tracks, 15);
-        writer.write(vis);
-
-        prevGray = currGray.clone();
-
-        if (tracks.empty()) {
-            std::cerr << "No points left to track.\n";
-            break;
-        }
-    }
-
-    cap.release();
-    writer.release();
-    csv.close();
-
-    std::cout << "Done.\n";
-    std::cout << "Saved video: " << outputVideo << "\n";
-    std::cout << "Saved tracking: " << outputCsv << "\n";
-
-    return 0;
 }
