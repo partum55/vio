@@ -32,6 +32,15 @@ public:
 
     bool connect(const std::string& host, int port, int retries = 20, int retry_delay_ms = 250);
     bool sendInit(const Dataset& dataset);
+    bool sendInit(const std::string& dataset_root,
+                  int image_width,
+                  int image_height,
+                  double fx,
+                  double fy,
+                  double cx,
+                  double cy,
+                  double visual_scale = 1.0,
+                  double ground_z = 0.0);
     bool sendSyntheticInit();
     bool sendPointCloud(const PointCloud& cloud, std::size_t max_points = 2500);
     bool sendSample(const StreamSample& sample);

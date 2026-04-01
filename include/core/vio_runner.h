@@ -25,11 +25,26 @@ struct RunResult {
     std::filesystem::path video_path;
 };
 
+struct ViconReplayConfig {
+    double playback_rate = 1.0;
+    double visual_scale = 4.0;
+    double first_view_fps = 20.0;
+    int first_view_width = 1280;
+    int first_view_height = 720;
+    double first_view_fx = 700.0;
+    double first_view_fy = 700.0;
+};
+
 RunResult runVisualInertialOdometry(const Dataset& dataset,
                                     const RunConfig& config,
                                     RerunStreamClient* stream_client);
 
 RunResult runSyntheticDemo(const GeneratorConfig& generator_config,
+                           const RunConfig& config,
+                           RerunStreamClient* stream_client);
+
+RunResult runViconLiveDemo(const std::filesystem::path& dataset_root,
+                           const ViconReplayConfig& replay_config,
                            const RunConfig& config,
                            RerunStreamClient* stream_client);
 

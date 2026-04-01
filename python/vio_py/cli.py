@@ -16,11 +16,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_grid_segments(extent: int = 10, step: int = 1) -> list[list[list[float]]]:
+def build_grid_segments(extent: int = 10, step: int = 1, z: float = 0.0) -> list[list[list[float]]]:
     segments: list[list[list[float]]] = []
     for value in range(-extent, extent + 1, step):
-        segments.append([[float(value), 0.0, float(-extent)], [float(value), 0.0, float(extent)]])
-        segments.append([[float(-extent), 0.0, float(value)], [float(extent), 0.0, float(value)]])
+        segments.append([[float(value), float(-extent), z], [float(value), float(extent), z]])
+        segments.append([[float(-extent), float(value), z], [float(extent), float(value), z]])
     return segments
 
 
@@ -28,23 +28,57 @@ def try_import_runtime():
     try:
         import cv2  # type: ignore
         import rerun as rr  # type: ignore
+        import rerun.blueprint as rrb  # type: ignore
     except Exception as exc:  # pragma: no cover
         print(f"Receiver dependency error: {exc}", file=sys.stderr)
-        return None, None
-    return rr, cv2
+        return None, None, None
+    return rr, cv2, rrb
 
 
 def run_server(args: argparse.Namespace) -> int:
-    rr, cv2 = try_import_runtime()
-    if rr is None or cv2 is None:
+    rr, cv2, rrb = try_import_runtime()
+    if rr is None or cv2 is None or rrb is None:
         return 2
 
+    blueprint = rrb.Blueprint(
+        rrb.Horizontal(
+            rrb.Spatial3DView(
+                origin="/",
+                name="3D World",
+                background=rrb.Background(kind=rrb.components.BackgroundKind.GradientBright),
+                line_grid=rrb.LineGrid3D(
+                    visible=True,
+                    color=[235, 245, 255, 90],
+                    stroke_width=1.5,
+                ),
+                spatial_information=rrb.SpatialInformation(
+                    target_frame="tf#/",
+                    show_axes=True,
+                    show_bounding_box=False,
+                ),
+            ),
+            rrb.Vertical(
+                rrb.Spatial2DView(
+                    origin="camera/first_view",
+                    name="First-person camera",
+                ),
+                rrb.TextDocumentView(origin="world/dataset", name="Dataset info"),
+                rrb.TextDocumentView(origin="stats/tracks", name="Tracks"),
+                row_shares=[3, 1, 1],
+            ),
+            column_shares=[3, 1],
+        ),
+    )
     rr.init("vio")
-    rr.spawn()
+    rr.spawn(hide_welcome_screen=True)
+    rr.send_blueprint(blueprint, make_active=True)
+    rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
+    visual_scale = 1.0
+    ground_z = 0.0
     rr.log(
         "world/grid",
         rr.LineStrips3D(
-            build_grid_segments(),
+            build_grid_segments(z=ground_z),
             colors=[[80, 80, 80]],
         ),
     )
@@ -67,13 +101,26 @@ def run_server(args: argparse.Namespace) -> int:
                 msg_type = message.get("type")
 
                 if msg_type == "init":
+                    visual_scale = max(1.0, float(message.get("visual_scale", 1.0)))
+                    ground_z = float(message.get("ground_z", 0.0))
+                    grid_extent = max(10, int(round(10.0 * visual_scale)))
+                    grid_step = max(1, int(round(visual_scale)))
+                    rr.log(
+                        "world/grid",
+                        rr.LineStrips3D(
+                            build_grid_segments(extent=grid_extent, step=grid_step, z=ground_z),
+                            colors=[[80, 80, 80]],
+                        ),
+                    )
                     rr.log(
                         "world/dataset",
                         rr.TextDocument(
                             f"Dataset: {message.get('dataset_root', '')}\n"
                             f"Resolution: {message.get('image_width')}x{message.get('image_height')}\n"
                             f"Intrinsics: fx={message.get('fx')}, fy={message.get('fy')}, "
-                            f"cx={message.get('cx')}, cy={message.get('cy')}"
+                            f"cx={message.get('cx')}, cy={message.get('cy')}\n"
+                            f"Visual scale: {visual_scale:g}x\n"
+                            f"Ground z: {ground_z:.2f}"
                         ),
                     )
                     continue
@@ -84,13 +131,15 @@ def run_server(args: argparse.Namespace) -> int:
                     if positions:
                         rr.log(
                             "world/cloud",
-                            rr.Points3D(positions, colors=colors, radii=[0.03]),
+                            rr.Points3D(positions, colors=colors, radii=[0.03 * visual_scale]),
                         )
                     continue
 
                 if msg_type == "sample":
                     timestamp = float(message["timestamp"])
-                    if hasattr(rr, "set_time_seconds"):
+                    if hasattr(rr, "set_time"):
+                        rr.set_time("sim_time", timestamp=timestamp)
+                    elif hasattr(rr, "set_time_seconds"):
                         rr.set_time_seconds("sim_time", timestamp)
 
                     position = [float(v) for v in message["position"]]
@@ -102,14 +151,19 @@ def run_server(args: argparse.Namespace) -> int:
                         rr.LineStrips3D([trajectory], colors=[[48, 220, 128]]),
                     )
                     rr.log(
+                        f"world/trajectory_points/{len(trajectory) - 1:06d}",
+                        rr.Points3D([position], colors=[[48, 220, 128]], radii=[0.03 * visual_scale]),
+                    )
+                    rr.log(
                         "world/agent",
-                        rr.Points3D([position], colors=[[255, 220, 64]], radii=[0.08]),
+                        rr.Points3D([position], colors=[[255, 220, 64]], radii=[0.08 * visual_scale]),
                     )
 
+                    heading_len = 0.35 * visual_scale
                     direction_tip = [
-                        position[0] + 0.35 * (2.0 * (quat[0] * quat[2] + quat[3] * quat[1])),
-                        position[1] + 0.35 * (2.0 * (quat[1] * quat[2] - quat[3] * quat[0])),
-                        position[2] + 0.35 * (1.0 - 2.0 * (quat[0] * quat[0] + quat[1] * quat[1])),
+                        position[0] + heading_len * (2.0 * (quat[0] * quat[2] + quat[3] * quat[1])),
+                        position[1] + heading_len * (2.0 * (quat[1] * quat[2] - quat[3] * quat[0])),
+                        position[2] + heading_len * (1.0 - 2.0 * (quat[0] * quat[0] + quat[1] * quat[1])),
                     ]
                     rr.log(
                         "world/agent_heading",

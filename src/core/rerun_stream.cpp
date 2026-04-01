@@ -48,22 +48,45 @@ bool RerunStreamClient::connect(const std::string& host, int port, int retries, 
 }
 
 bool RerunStreamClient::sendInit(const Dataset& dataset) {
+    return sendInit(
+        dataset.root.string(),
+        dataset.camera.width,
+        dataset.camera.height,
+        dataset.camera.fx,
+        dataset.camera.fy,
+        dataset.camera.cx,
+        dataset.camera.cy,
+        1.0,
+        0.0);
+}
+
+bool RerunStreamClient::sendInit(const std::string& dataset_root,
+                                 int image_width,
+                                 int image_height,
+                                 double fx,
+                                 double fy,
+                                 double cx,
+                                 double cy,
+                                 double visual_scale,
+                                 double ground_z) {
     std::ostringstream json;
     json << "{"
          << "\"type\":\"init\","
-         << "\"dataset_root\":\"" << escapeJson(dataset.root.string()) << "\","
-         << "\"image_width\":" << dataset.camera.width << ","
-         << "\"image_height\":" << dataset.camera.height << ","
-         << "\"fx\":" << dataset.camera.fx << ","
-         << "\"fy\":" << dataset.camera.fy << ","
-         << "\"cx\":" << dataset.camera.cx << ","
-         << "\"cy\":" << dataset.camera.cy
+         << "\"dataset_root\":\"" << escapeJson(dataset_root) << "\","
+         << "\"image_width\":" << image_width << ","
+         << "\"image_height\":" << image_height << ","
+         << "\"fx\":" << fx << ","
+         << "\"fy\":" << fy << ","
+         << "\"cx\":" << cx << ","
+         << "\"cy\":" << cy << ","
+         << "\"visual_scale\":" << visual_scale << ","
+         << "\"ground_z\":" << ground_z
          << "}";
     return sendLine(json.str());
 }
 
 bool RerunStreamClient::sendSyntheticInit() {
-    return sendLine("{\"type\":\"init\",\"dataset_root\":\"synthetic_demo\",\"image_width\":1280,\"image_height\":720,\"fx\":700.0,\"fy\":700.0,\"cx\":640.0,\"cy\":360.0}");
+    return sendInit("synthetic_demo", 1280, 720, 700.0, 700.0, 640.0, 360.0, 1.0, 0.0);
 }
 
 bool RerunStreamClient::sendPointCloud(const PointCloud& cloud, std::size_t max_points) {

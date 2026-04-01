@@ -16,12 +16,12 @@ Trajectory generateTrajectory(const GeneratorConfig& config) {
         double angle = 2.0 * M_PI * config.helix_turns * t;
 
         double x = config.helix_radius * std::cos(angle);
-        double z = config.helix_radius * std::sin(angle);
-        double y = config.helix_height * t;
+        double y = config.helix_radius * std::sin(angle);
+        double z = config.helix_height * t;
 
         Eigen::Vector3d pos(x, y, z);
-        Eigen::Vector3d target(0.0, config.helix_height * 0.5, 0.0);
-        Eigen::Vector3d up(0.0, 1.0, 0.0);
+        Eigen::Vector3d target(0.0, 0.0, config.helix_height * 0.5);
+        Eigen::Vector3d up(0.0, 0.0, 1.0);
 
         Eigen::Vector3d forward = (target - pos).normalized();
         Eigen::Vector3d right = forward.cross(up).normalized();

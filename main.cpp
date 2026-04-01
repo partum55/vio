@@ -28,6 +28,8 @@ struct CliOptions {
     bool record_video = true;
     bool auto_spawn_receiver = true;
     bool synthetic_demo = false;
+    bool vicon_demo = false;
+    double playback_rate = 1.0;
 };
 
 void printUsage(const char* prog) {
@@ -38,6 +40,9 @@ void printUsage(const char* prog) {
         << "  --record <file>          Save first-view video to file (default: first_view.mp4)\n"
         << "  --no-record              Disable first-view video export\n"
         << "  --demo                   Run synthetic generated scene without a dataset\n"
+        << "  --demo-l                 Alias for --vicon-demo (live Vicon position replay)\n"
+        << "  --vicon-demo             Replay dataset/mav0/vicon0/data.csv as a live 3D point stream\n"
+        << "  --rate <speed>           Playback speed multiplier for --vicon-demo (default: 1.0)\n"
         << "  --host <addr>            Receiver host (default: 127.0.0.1)\n"
         << "  --port <port>            Receiver port (default: 9877)\n"
         << "  --no-receiver            Do not auto-start the Python Rerun receiver\n";
@@ -69,6 +74,17 @@ CliOptions parseArgs(int argc, char** argv) {
             options.synthetic_demo = true;
             continue;
         }
+        if (arg == "--demo-l" || arg == "--vicon-demo" || arg == "--vicon-live-demo" || arg == "--vicon-live.demo") {
+            options.vicon_demo = true;
+            continue;
+        }
+        if (arg == "--rate") {
+            if (++i >= argc) {
+                throw std::runtime_error("--rate requires a value");
+            }
+            options.playback_rate = std::stod(argv[i]);
+            continue;
+        }
         if (arg == "--host") {
             if (++i >= argc) {
                 throw std::runtime_error("--host requires a value");
@@ -97,8 +113,18 @@ CliOptions parseArgs(int argc, char** argv) {
         dataset_consumed = true;
     }
 
+    if (options.vicon_demo && (!dataset_consumed || options.dataset_path == ".")) {
+        options.dataset_path = "dataset/mav0";
+        dataset_consumed = true;
+    }
     if (!dataset_consumed && !options.synthetic_demo) {
         throw std::runtime_error("dataset_path is required");
+    }
+    if (options.synthetic_demo && options.vicon_demo) {
+        throw std::runtime_error("--demo and --vicon-demo cannot be used together");
+    }
+    if (options.playback_rate <= 0.0) {
+        throw std::runtime_error("--rate must be positive");
     }
     return options;
 }
@@ -196,6 +222,21 @@ int main(int argc, char** argv) {
             vio::GeneratorConfig generator_config;
             result = vio::runSyntheticDemo(
                 generator_config,
+                run_config,
+                stream_ready ? &stream_client : nullptr);
+        } else if (options.vicon_demo) {
+            std::cout << "Running live Vicon replay from " << options.dataset_path / "vicon0" / "data.csv"
+                      << " at " << options.playback_rate << "x" << std::endl;
+            if (options.record_video) {
+                std::cout << "Video export is disabled for Vicon live replay." << std::endl;
+            }
+
+            run_config.write_video = false;
+            vio::ViconReplayConfig replay_config;
+            replay_config.playback_rate = options.playback_rate;
+            result = vio::runViconLiveDemo(
+                options.dataset_path,
+                replay_config,
                 run_config,
                 stream_ready ? &stream_client : nullptr);
         } else {

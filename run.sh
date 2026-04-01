@@ -36,14 +36,20 @@ run_quiet() {
 if [[ $# -lt 1 ]]; then
   echo "Usage: ./run.sh <dataset_path> [vio options...]"
   echo "   or: ./run.sh --demo [vio options...]"
+  echo "   or: ./run.sh --demo-l [vio options...]"
+  echo "   or: ./run.sh --vicon-demo [.] [vio options...]"
   exit 1
 fi
 
 if [[ "$1" == "--help" || "$1" == "-h" ]]; then
   echo "Usage: ./run.sh <dataset_path> [vio options...]"
   echo "   or: ./run.sh --demo [vio options...]"
+  echo "   or: ./run.sh --demo-l [vio options...]"
+  echo "   or: ./run.sh --vicon-demo [.] [vio options...]"
   echo "Example: ./run.sh /path/to/euroc_dataset --record output.mp4"
   echo "Example: ./run.sh --demo"
+  echo "Example: ./run.sh --demo-l"
+  echo "Example: ./run.sh --vicon-demo . --rate 2.0"
   exit 0
 fi
 
@@ -51,6 +57,17 @@ RUN_ARGS=()
 if [[ "$1" == "--demo" ]]; then
   RUN_ARGS+=(--demo)
   shift || true
+elif [[ "$1" == "--demo-l" || "$1" == "--vicon-demo" || "$1" == "--vicon-live-demo" || "$1" == "--vicon-live.demo" ]]; then
+  shift || true
+  if [[ "${1-}" == "." ]]; then
+    shift || true
+  fi
+  DATASET_PATH="${ROOT_DIR}/dataset/mav0"
+  if [[ ! -d "${DATASET_PATH}" ]]; then
+    echo "Hardcoded Vicon demo dataset does not exist: ${DATASET_PATH}"
+    exit 1
+  fi
+  RUN_ARGS+=(--vicon-demo "${DATASET_PATH}")
 else
   DATASET_PATH="$1"
   shift || true
@@ -99,6 +116,8 @@ run_quiet "Build" "${BUILD_LOG}" cmake --build "${BUILD_DIR}" -j
 say "Runtime logs: ${LOG_DIR}"
 if [[ "${RUN_ARGS[*]-}" == "--demo" ]]; then
   say "Launching: synthetic live demo"
+elif [[ "${RUN_ARGS[0]-}" == "--vicon-demo" ]]; then
+  say "Launching: Vicon demo from ${RUN_ARGS[1]}"
 else
   say "Launching: dataset ${RUN_ARGS[0]}"
 fi
