@@ -73,7 +73,8 @@ public:
         Eigen::Vector2d K = Sigma * H.transpose() / S;
 
         mu = mu + K * innovation;
-        Sigma = (Eigen::Matrix2d::Identity() - K * H) * Sigma;
+        Eigen::Matrix2d I = Eigen::Matrix2d::Identity();
+        Sigma = (I - K * H) * Sigma * (I - K * H).transpose() + K * R * K.transpose();
 
         return mu(0);
     }
