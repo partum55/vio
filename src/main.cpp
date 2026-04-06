@@ -33,6 +33,5 @@ int main(int argc, char** argv) {
         std::cout << "Velocity: " << last.v.transpose() << "\n";
         std::cout << "Quaternion: [" << last.q.w() << ", " << last.q.x() << ", " << last.q.y() << ", " << last.q.z() << "]\n";
     }
-
     return 0;
 }
