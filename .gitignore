@@ -1,22 +1,35 @@
+# ==== DATA ====
 cam0/
+
 # ==== CMake / build ====
 cmake-build-*/
 build/
 CMakeFiles/
 CMakeCache.txt
-*.cmake
+compile_commands.json
+CTestTestfile.cmake
+cmake_install.cmake
 Makefile
+*.cmake
 
-# ==== CLion ====
-.idea/
-
-# ==== binaries ====
-*.out
+# ==== binaries / objects ====
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
 *.exe
+*.out
 *.app
 
 # ==== logs ====
 *.log
 
+# ==== IDE ====
+.idea/
+.vscode/
+
 # ==== OS ====
 .DS_Store
+Thumbs.db

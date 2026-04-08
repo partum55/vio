@@ -1,4 +1,4 @@
-#include "lk_tracker.hpp"
+#include "lk_tracker_without_pyr.hpp"
 #include "tracking_vis.hpp"
 #include "feature_refresh.hpp"
 
@@ -82,6 +82,13 @@ int main()
         tracks.push_back(t);
     }
 
+    FeatureRefreshParams refreshParams;
+    refreshParams.minTrackedFeatures = 50;
+    refreshParams.targetFeatures = 100;
+    refreshParams.suppressionRadius = 10.0f;
+    refreshParams.qualityLevel = 0.01;
+    refreshParams.minDistance = 10.0;
+
     int frameIdx = 0;
 
     for (const auto& t : tracks) {
@@ -90,12 +97,6 @@ int main()
 
     writer.write(drawTrackingVisualization(prevFrame, tracks));
 
-    FeatureRefreshParams refreshParams;
-    refreshParams.minTrackedFeatures = 50;
-    refreshParams.targetFeatures = 100;
-    refreshParams.suppressionRadius = 10.0f;
-    refreshParams.qualityLevel = 0.01;
-    refreshParams.minDistance = 10.0;
     for (size_t imgIdx = 1; imgIdx < imagePaths.size(); ++imgIdx) {
         cv::Mat currFrame = cv::imread(imagePaths[imgIdx], cv::IMREAD_COLOR);
         if (currFrame.empty()) {
@@ -120,7 +121,19 @@ int main()
 
         try {
             auto t1 = std::chrono::high_resolution_clock::now();
-            trackPointsPyramidalLK(prevGray, currGray, ptsPrev, ptsCurr, status, err, 9, 3, 10, 1e-3f);
+
+            trackPointsLKSingleLevel(
+                prevGray,
+                currGray,
+                ptsPrev,
+                ptsCurr,
+                status,
+                err,
+                9,
+                10,
+                1e-3f
+            );
+
             auto t2 = std::chrono::high_resolution_clock::now();
             double ms = std::chrono::duration<double, std::milli>(t2 - t1).count();
             std::cout << "Frame " << frameIdx << " tracking time: " << ms << " ms\n";
