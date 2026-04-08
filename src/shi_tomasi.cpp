@@ -17,8 +17,8 @@ CustomShiTomasiDetector::CustomShiTomasiDetector(
 }
 
 cv::Mat CustomShiTomasiDetector::shiTomasiScoreImage(
-    const cv::Mat &gray8,
-    const ShiTomasiParams &p)
+    const cv::Mat& gray8,
+    const ShiTomasiParams& p)
 {
     CV_Assert(gray8.type() == CV_8U);
 
@@ -101,7 +101,7 @@ cv::Mat CustomShiTomasiDetector::shiTomasiScoreImage(
     return score_;
 }
 
-cv::Mat CustomShiTomasiDetector::nmsLocalMax(const cv::Mat &score, int r)
+cv::Mat CustomShiTomasiDetector::nmsLocalMax(const cv::Mat& score, int r)
 {
     cv::Mat kernel = cv::getStructuringElement(
         cv::MORPH_RECT,
@@ -117,9 +117,20 @@ cv::Mat CustomShiTomasiDetector::nmsLocalMax(const cv::Mat &score, int r)
 }
 
 std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
-    const cv::Mat &scoreNms,
-    const ShiTomasiParams &p)
+    const cv::Mat& scoreNms,
+    const ShiTomasiParams& p)
 {
+    return selectWithGrid(scoreNms, p, cv::Mat());
+}
+
+std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
+    const cv::Mat& scoreNms,
+    const ShiTomasiParams& p,
+    const cv::Mat& allowedMask)
+{
+    CV_Assert(allowedMask.empty() ||
+              (allowedMask.type() == CV_8U && allowedMask.size() == scoreNms.size()));
+
     double minVal = 0.0;
     double maxVal = 0.0;
     cv::minMaxLoc(scoreNms, &minVal, &maxVal);
@@ -131,9 +142,16 @@ std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
 
     for (int y = 0; y < scoreNms.rows; ++y)
     {
-        const float *row = scoreNms.ptr<float>(y);
+        const float* row = scoreNms.ptr<float>(y);
+        const uchar* maskRow = allowedMask.empty() ? nullptr : allowedMask.ptr<uchar>(y);
+
         for (int x = 0; x < scoreNms.cols; ++x)
         {
+            if (maskRow && maskRow[x] == 0)
+            {
+                continue;
+            }
+
             const float s = row[x];
             if (s >= thresh)
             {
@@ -149,9 +167,10 @@ std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
 
     const size_t keepCount = std::min<size_t>(
         cand.size(),
-        std::max<size_t>(static_cast<size_t>(p.maxCorners) * 8, static_cast<size_t>(p.maxCorners)));
+        std::max<size_t>(static_cast<size_t>(p.maxCorners) * 8,
+                         static_cast<size_t>(p.maxCorners)));
 
-    auto byScoreDesc = [](const Candidate &a, const Candidate &b)
+    auto byScoreDesc = [](const Candidate& a, const Candidate& b)
     {
         return a.score > b.score;
     };
@@ -181,7 +200,7 @@ std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
         return gy * gridCols + gx;
     };
 
-    for (const auto &c : cand)
+    for (const auto& c : cand)
     {
         if (static_cast<int>(pts.size()) >= p.maxCorners)
         {
@@ -192,8 +211,8 @@ std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
             static_cast<float>(c.x),
             static_cast<float>(c.y));
 
-        int gx = c.x / cellSize;
-        int gy = c.y / cellSize;
+        const int gx = c.x / cellSize;
+        const int gy = c.y / cellSize;
 
         bool ok = true;
 
@@ -201,10 +220,10 @@ std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
         {
             for (int nnx = std::max(0, gx - 1); nnx <= std::min(gridCols - 1, gx + 1); ++nnx)
             {
-                const auto &bucket = grid[gridIndex(nnx, nny)];
+                const auto& bucket = grid[gridIndex(nnx, nny)];
                 for (int idx : bucket)
                 {
-                    const cv::Point2f &chosen = pts[idx];
+                    const cv::Point2f& chosen = pts[idx];
                     const float dx = pt.x - chosen.x;
                     const float dy = pt.y - chosen.y;
 
@@ -229,7 +248,7 @@ std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
 
         if (ok)
         {
-            int newIndex = static_cast<int>(pts.size());
+            const int newIndex = static_cast<int>(pts.size());
             pts.push_back(pt);
             grid[gridIndex(gx, gy)].push_back(newIndex);
         }
@@ -239,19 +258,31 @@ std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
 }
 
 std::vector<cv::Point2f> CustomShiTomasiDetector::detect(
-    const cv::Mat &img,
-    const ShiTomasiParams &params)
+    const cv::Mat& img,
+    const ShiTomasiParams& params)
+{
+    return detect(img, params, cv::Mat());
+}
+
+std::vector<cv::Point2f> CustomShiTomasiDetector::detect(
+    const cv::Mat& img,
+    const ShiTomasiParams& params,
+    const cv::Mat& allowedMask)
 {
     cv::Mat gray = toGrayU8(img);
+
+    CV_Assert(allowedMask.empty() ||
+              (allowedMask.type() == CV_8U && allowedMask.size() == gray.size()));
+
     cv::Mat score = shiTomasiScoreImage(gray, params);
     cv::Mat scoreNms = nmsLocalMax(score, params.nmsRadius);
 
-    return selectWithGrid(scoreNms, params);
+    return selectWithGrid(scoreNms, params, allowedMask);
 }
 
 std::vector<cv::Point2f> OpenCVShiTomasiDetector::detect(
-    const cv::Mat &img,
-    const ShiTomasiParams &params)
+    const cv::Mat& img,
+    const ShiTomasiParams& params)
 {
     cv::Mat gray = toGrayU8(img);
 
@@ -270,7 +301,7 @@ std::vector<cv::Point2f> OpenCVShiTomasiDetector::detect(
     return pts;
 }
 
-cv::Mat toGrayU8(const cv::Mat &imgBgrOrGray)
+cv::Mat toGrayU8(const cv::Mat& imgBgrOrGray)
 {
     cv::Mat gray;
 
@@ -298,8 +329,8 @@ cv::Mat toGrayU8(const cv::Mat &imgBgrOrGray)
 }
 
 cv::Mat drawKeypointsOnImage(
-    const cv::Mat &imgBgrOrGray,
-    const std::vector<cv::Point2f> &pts,
+    const cv::Mat& imgBgrOrGray,
+    const std::vector<cv::Point2f>& pts,
     int radius,
     int thickness)
 {
@@ -314,7 +345,7 @@ cv::Mat drawKeypointsOnImage(
         vis = imgBgrOrGray.clone();
     }
 
-    for (const auto &p : pts)
+    for (const auto& p : pts)
     {
         cv::circle(
             vis,

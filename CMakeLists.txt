@@ -10,6 +10,7 @@ set(SOURCES
     src/shi_tomasi.cpp
     src/gaussian_blur.cpp
     src/sobel.cpp
+    src/feature_refresh.cpp
 )
 
 add_executable(shi_tomasi
