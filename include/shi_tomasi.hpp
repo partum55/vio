@@ -37,17 +37,15 @@ private:
     ABCThreadPool& pool_;
     int num_tasks_;
 
+    cv::Mat gray32_;
     cv::Mat blur_;
+    cv::Mat blur_tmp_;
     cv::Mat Ix_;
     cv::Mat Iy_;
     cv::Mat Ixx_;
     cv::Mat Iyy_;
     cv::Mat Ixy_;
-    cv::Mat trace_;
-    cv::Mat det_;
-    cv::Mat halfTrace_;
-    cv::Mat inside_;
-    cv::Mat sqrtInside_;
+    cv::Mat tensor_tmp_;
     cv::Mat score_;
     cv::Mat dilated_;
 };

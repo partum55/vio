@@ -1,6 +1,7 @@
 #include "shi_tomasi.hpp"
 #include "gaussian_blur.hpp"
 #include "sobel.hpp"
+#include "parallel_utils.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -21,42 +22,81 @@ cv::Mat CustomShiTomasiDetector::shiTomasiScoreImage(
 {
     CV_Assert(gray8.type() == CV_8U);
 
-    cv::Mat gray32;
-    gray8.convertTo(gray32, CV_32F);
+    gray8.convertTo(gray32_, CV_32F);
 
-    blur_ = gray32.clone();
-
+    blur_ = gray32_;
     const int blurPasses = std::max(1, static_cast<int>(std::round(p.gaussianSigma)));
     for (int i = 0; i < blurPasses; ++i)
     {
-        blur_ = gaussianBlurCustom(blur_, pool_, num_tasks_);
+        gaussianBlurCustom(blur_, blur_tmp_, pool_, num_tasks_);
+        std::swap(blur_, blur_tmp_);
     }
 
     centralDifferenceXY(blur_, Ix_, Iy_, pool_, num_tasks_);
 
-    cv::multiply(Ix_, Ix_, Ixx_);
-    cv::multiply(Iy_, Iy_, Iyy_);
-    cv::multiply(Ix_, Iy_, Ixy_);
+    Ixx_.create(blur_.size(), CV_32F);
+    Iyy_.create(blur_.size(), CV_32F);
+    Ixy_.create(blur_.size(), CV_32F);
+
+    parallel_for_rows(pool_, blur_.rows, num_tasks_,
+        [&](int y0, int y1)
+        {
+            for (int y = y0; y < y1; ++y)
+            {
+                const float* ix = Ix_.ptr<float>(y);
+                const float* iy = Iy_.ptr<float>(y);
+
+                float* ixx = Ixx_.ptr<float>(y);
+                float* iyy = Iyy_.ptr<float>(y);
+                float* ixy = Ixy_.ptr<float>(y);
+
+                for (int x = 0; x < blur_.cols; ++x)
+                {
+                    const float gx = ix[x];
+                    const float gy = iy[x];
+                    ixx[x] = gx * gx;
+                    iyy[x] = gy * gy;
+                    ixy[x] = gx * gy;
+                }
+            }
+        });
 
     const int tensorPasses = std::max(1, p.blockSize / 2);
     for (int i = 0; i < tensorPasses; ++i)
     {
-        Ixx_ = gaussianBlurCustom(Ixx_, pool_, num_tasks_);
-        Iyy_ = gaussianBlurCustom(Iyy_, pool_, num_tasks_);
-        Ixy_ = gaussianBlurCustom(Ixy_, pool_, num_tasks_);
+        gaussianBlurCustom(Ixx_, tensor_tmp_, pool_, num_tasks_);
+        std::swap(Ixx_, tensor_tmp_);
+
+        gaussianBlurCustom(Iyy_, tensor_tmp_, pool_, num_tasks_);
+        std::swap(Iyy_, tensor_tmp_);
+
+        gaussianBlurCustom(Ixy_, tensor_tmp_, pool_, num_tasks_);
+        std::swap(Ixy_, tensor_tmp_);
     }
 
-    trace_ = Ixx_ + Iyy_;
-    det_ = Ixx_.mul(Iyy_) - Ixy_.mul(Ixy_);
+    score_.create(blur_.size(), CV_32F);
 
-    halfTrace_ = 0.5f * trace_;
-    inside_ = halfTrace_.mul(halfTrace_) - det_;
+    parallel_for_rows(pool_, blur_.rows, num_tasks_,
+        [&](int y0, int y1)
+        {
+            for (int y = y0; y < y1; ++y)
+            {
+                const float* ixx = Ixx_.ptr<float>(y);
+                const float* iyy = Iyy_.ptr<float>(y);
+                const float* ixy = Ixy_.ptr<float>(y);
+                float* dst = score_.ptr<float>(y);
 
-    cv::max(inside_, 0, inside_);
-    cv::sqrt(inside_, sqrtInside_);
-
-    score_ = halfTrace_ - sqrtInside_;
-    cv::max(score_, 0, score_);
+                for (int x = 0; x < blur_.cols; ++x)
+                {
+                    const float trace = ixx[x] + iyy[x];
+                    const float det = ixx[x] * iyy[x] - ixy[x] * ixy[x];
+                    const float halfTrace = 0.5f * trace;
+                    const float inside = std::max(0.0f, halfTrace * halfTrace - det);
+                    const float score = halfTrace - std::sqrt(inside);
+                    dst[x] = std::max(0.0f, score);
+                }
+            }
+        });
 
     return score_;
 }
@@ -87,7 +127,7 @@ std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
     const float thresh = static_cast<float>(p.qualityLevel * maxVal);
 
     std::vector<Candidate> cand;
-    cand.reserve(scoreNms.rows * scoreNms.cols / 20);
+    cand.reserve(scoreNms.rows * scoreNms.cols / 32);
 
     for (int y = 0; y < scoreNms.rows; ++y)
     {
@@ -102,11 +142,27 @@ std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
         }
     }
 
-    std::sort(cand.begin(), cand.end(),
-              [](const Candidate &a, const Candidate &b)
-              {
-                  return a.score > b.score;
-              });
+    if (cand.empty())
+    {
+        return {};
+    }
+
+    const size_t keepCount = std::min<size_t>(
+        cand.size(),
+        std::max<size_t>(static_cast<size_t>(p.maxCorners) * 8, static_cast<size_t>(p.maxCorners)));
+
+    auto byScoreDesc = [](const Candidate &a, const Candidate &b)
+    {
+        return a.score > b.score;
+    };
+
+    if (cand.size() > keepCount)
+    {
+        std::nth_element(cand.begin(), cand.begin() + keepCount, cand.end(), byScoreDesc);
+        cand.resize(keepCount);
+    }
+
+    std::sort(cand.begin(), cand.end(), byScoreDesc);
 
     std::vector<cv::Point2f> pts;
     pts.reserve(std::min<int>(p.maxCorners, static_cast<int>(cand.size())));

@@ -1,0 +1,46 @@
+dmindaryna_shevchuk@DARYNA:/mnt/d/UCU/акс/project/vio$ python3 efficiency_test.py     --exe ./build/benchmark_shi_tomasi     --image tests/test.jpg     --threads 1,2,4,8     --repeats 5     --warmup 1
+Benchmark configuration:
+  Executable: /mnt/d/UCU/акс/project/vio/build/benchmark_shi_tomasi
+  Image:      /mnt/d/UCU/акс/project/vio/tests/test.jpg
+  Threads:    [1, 2, 4, 8]
+  Repeats:    5
+  Warmup:     1
+  Output dir: /mnt/d/UCU/акс/project/vio/benchmark_results
+
+[threads=1] warmup...
+[threads=1] measuring...
+  run 1/5: 2.222490 s
+  run 2/5: 2.226180 s
+  run 3/5: 2.205990 s
+  run 4/5: 2.201960 s
+  run 5/5: 2.201200 s
+[threads=2] warmup...
+[threads=2] measuring...
+  run 1/5: 1.737320 s
+  run 2/5: 1.729030 s
+  run 3/5: 1.715410 s
+  run 4/5: 1.697840 s
+  run 5/5: 1.691070 s
+[threads=4] warmup...
+[threads=4] measuring...
+  run 1/5: 1.441600 s
+  run 2/5: 1.396970 s
+  run 3/5: 1.470440 s
+  run 4/5: 1.441520 s
+  run 5/5: 1.388830 s
+[threads=8] warmup...
+[threads=8] measuring...
+  run 1/5: 1.152580 s
+  run 2/5: 1.121490 s
+  run 3/5: 1.125260 s
+  run 4/5: 1.124630 s
+  run 5/5: 1.160950 s
+
+ thr |    mean(s) |     std(s) |    speedup |        eff |   karp-flatt
+-----------------------------------------------------------------------
+   1 |   2.211564 |   0.011871 |     1.0000 |     1.0000 |            -
+   2 |   1.714134 |   0.019739 |     1.2902 |     0.6451 |     0.550155
+   4 |   1.427872 |   0.034154 |     1.5489 |     0.3872 |     0.527519
+   8 |   1.136982 |   0.018356 |     1.9451 |     0.2431 |     0.444694
+
+Saved results to: /mnt/d/UCU/акс/project/vio/benchmark_results

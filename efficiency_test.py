@@ -39,18 +39,11 @@ class SummaryRow:
 
 def run_once(executable: Path, image_path: Path, threads: int) -> float:
     """
-    Runs the benchmark once and returns wall-clock time in seconds.
-
-    Assumption:
-        executable CLI is:
-            ./shi_tomasi <image_path> <num_threads>
-
-    If your program currently accepts only <image_path>,
-    update it to accept num_threads too.
+    Runs benchmark executable once and parses mean_ms from stdout.
+    Returns time in seconds.
     """
-    cmd = [str(executable), str(image_path), str(threads)]
+    cmd = [str(executable), str(image_path), str(threads), "30", "5"]
 
-    start = time.perf_counter()
     completed = subprocess.run(
         cmd,
         stdout=subprocess.PIPE,
@@ -58,7 +51,6 @@ def run_once(executable: Path, image_path: Path, threads: int) -> float:
         text=True,
         check=False,
     )
-    end = time.perf_counter()
 
     if completed.returncode != 0:
         print("Command failed:", " ".join(cmd), file=sys.stderr)
@@ -66,7 +58,17 @@ def run_once(executable: Path, image_path: Path, threads: int) -> float:
         print("STDERR:\n", completed.stderr, file=sys.stderr)
         raise RuntimeError(f"Benchmark run failed for threads={threads}")
 
-    return end - start
+    tokens = completed.stdout.strip().split()
+    parsed = {}
+    for token in tokens:
+        if "=" in token:
+            k, v = token.split("=", 1)
+            parsed[k.strip()] = v.strip()
+
+    if "mean_ms" not in parsed:
+        raise RuntimeError(f"Could not parse mean_ms from stdout:\n{completed.stdout}")
+
+    return float(parsed["mean_ms"]) / 1000.0
 
 
 def karp_flatt_metric(speedup: float, p: int) -> float | None:
