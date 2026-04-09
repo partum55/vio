@@ -3,6 +3,23 @@
 #include <sstream>
 #include <iostream>
 #include <iomanip>
+#include <algorithm>
+#include <cmath>
+
+namespace
+{
+    constexpr double init_duration = 2.0; 
+    constexpr double epsilon = 1e-12;
+
+    struct ImuInitResult
+    {
+        Eigen::Vector3d avg_acc = Eigen::Vector3d::Zero();
+        Eigen::Vector3d avg_gyro = Eigen::Vector3d::Zero();
+        size_t start_idx = 0;
+        size_t end_idx = 0;
+        bool valid = false;
+    };
+}
 
 Eigen::Quaterniond deltaQuat(const Eigen::Vector3d& omega, double dt)
 {
@@ -17,7 +34,7 @@ Eigen::Quaterniond deltaQuat(const Eigen::Vector3d& omega, double dt)
 
 Eigen::Quaterniond initialOrientationFromAccel(const Eigen::Vector3d& acc_meas, const Eigen::Vector3d& gravity_world)
 {
-    if (acc_meas.norm() < 1e-12 || gravity_world.norm() < 1e-12) {
+    if (acc_meas.norm() < epsilon || gravity_world.norm() < epsilon) {
         return Eigen::Quaterniond(1.0, 0.0, 0.0, 0.0);
     }
 
@@ -84,9 +101,49 @@ static size_t findStartIndex(const std::vector<ImuSample>& imu, double t0)
 {
     size_t idx = 0;
     while (idx < imu.size() && imu[idx].t < t0) {
-        idx++;
+        ++idx;
     }
     return idx;
+}
+
+static ImuInitResult estimateInitialImuState(const std::vector<ImuSample>& imu, double t0, double init_duration_sec)
+{
+    ImuInitResult result;
+
+    if (imu.empty()) {
+        return result;
+    }
+
+    const size_t start_idx = findStartIndex(imu, t0);
+    if (start_idx >= imu.size()) {
+        return result;
+    }
+
+    const double t_end = imu[start_idx].t + init_duration_sec;
+
+    Eigen::Vector3d acc_sum = Eigen::Vector3d::Zero();
+    Eigen::Vector3d gyro_sum = Eigen::Vector3d::Zero();
+    size_t count = 0;
+    size_t end_idx = start_idx;
+
+    while (end_idx < imu.size() && imu[end_idx].t <= t_end) {
+        acc_sum += imu[end_idx].acc;
+        gyro_sum += imu[end_idx].gyro;
+        ++count;
+        ++end_idx;
+    }
+
+    if (count == 0) {
+        return result;
+    }
+
+    result.avg_acc = acc_sum / static_cast<double>(count);
+    result.avg_gyro = gyro_sum / static_cast<double>(count);
+    result.start_idx = start_idx;
+    result.end_idx = end_idx;
+    result.valid = true;
+
+    return result;
 }
 
 void integrateImuFiltered(const std::vector<ImuSample>& imu, double t0, double t1, Pose& pose, const Eigen::Vector3d& gravity, std::vector<Pose>& trajectory_out)
@@ -94,7 +151,16 @@ void integrateImuFiltered(const std::vector<ImuSample>& imu, double t0, double t
     trajectory_out.clear();
     trajectory_out.reserve(imu.size());
 
-    size_t idx = findStartIndex(imu, t0);
+    if (imu.empty()) {
+        return;
+    }
+
+    const ImuInitResult init = estimateInitialImuState(imu, t0, init_duration);
+    if (!init.valid) {
+        return;
+    }
+
+    size_t idx = init.end_idx;
     if (idx >= imu.size()) {
         return;
     }
@@ -102,14 +168,15 @@ void integrateImuFiltered(const std::vector<ImuSample>& imu, double t0, double t
     pose.t = imu[idx].t;
     pose.p.setZero();
     pose.v.setZero();
-    pose.q = initialOrientationFromAccel(imu[idx].acc, gravity);
+    pose.q = initialOrientationFromAccel(init.avg_acc, gravity);
     pose.q.normalize();
+
+    const Eigen::Vector3d gyro_bias = init.avg_gyro;
 
     const double gyro_noise_density  = 1.6968e-04;
     const double gyro_random_walk    = 1.9393e-05;
     const double accel_noise_density = 2.0e-03;
     const double accel_random_walk   = 3.0e-03;
-
 
     const double rate_hz = 200.0;
     const double gyro_q_scale  = 10.0;
@@ -129,20 +196,23 @@ void integrateImuFiltered(const std::vector<ImuSample>& imu, double t0, double t
     Kalman kf_ay(accel_sigma, accel_q);
     Kalman kf_az(accel_sigma, accel_q);
 
-    kf_gx.init(imu[idx].gyro.x());
-    kf_gy.init(imu[idx].gyro.y());
-    kf_gz.init(imu[idx].gyro.z());
+    const Eigen::Vector3d gyro0 = imu[idx].gyro - gyro_bias;
+    const Eigen::Vector3d acc0  = imu[idx].acc;
 
-    kf_ax.init(imu[idx].acc.x());
-    kf_ay.init(imu[idx].acc.y());
-    kf_az.init(imu[idx].acc.z());
+    kf_gx.init(gyro0.x());
+    kf_gy.init(gyro0.y());
+    kf_gz.init(gyro0.z());
+
+    kf_ax.init(acc0.x());
+    kf_ay.init(acc0.y());
+    kf_az.init(acc0.z());
 
     while (idx < imu.size() && imu[idx].t <= t1) {
         const ImuSample& s = imu[idx];
-        double dt = s.t - pose.t;
+        const double dt = s.t - pose.t;
 
         if (dt <= 0.0) {
-            idx++;
+            ++idx;
             continue;
         }
 
@@ -154,30 +224,34 @@ void integrateImuFiltered(const std::vector<ImuSample>& imu, double t0, double t
         kf_ay.predict(dt);
         kf_az.predict(dt);
 
+        const Eigen::Vector3d gyro_meas = s.gyro - gyro_bias;
+        const Eigen::Vector3d acc_meas  = s.acc;
+
         Eigen::Vector3d gyro_filtered;
         Eigen::Vector3d acc_filtered;
 
-        gyro_filtered.x() = kf_gx.update(s.gyro.x());
-        gyro_filtered.y() = kf_gy.update(s.gyro.y());
-        gyro_filtered.z() = kf_gz.update(s.gyro.z());
+        gyro_filtered.x() = kf_gx.update(gyro_meas.x());
+        gyro_filtered.y() = kf_gy.update(gyro_meas.y());
+        gyro_filtered.z() = kf_gz.update(gyro_meas.z());
 
-        acc_filtered.x() = kf_ax.update(s.acc.x());
-        acc_filtered.y() = kf_ay.update(s.acc.y());
-        acc_filtered.z() = kf_az.update(s.acc.z());
+        acc_filtered.x() = kf_ax.update(acc_meas.x());
+        acc_filtered.y() = kf_ay.update(acc_meas.y());
+        acc_filtered.z() = kf_az.update(acc_meas.z());
 
         pose.q *= deltaQuat(gyro_filtered, dt);
         pose.q.normalize();
 
-        Eigen::Vector3d acc_world = pose.q * acc_filtered;
-        Eigen::Vector3d acc_lin = acc_world - gravity;
+        const Eigen::Vector3d acc_world = pose.q * acc_filtered;
 
-        Eigen::Vector3d v_prev = pose.v;
+        const Eigen::Vector3d acc_lin = acc_world - gravity;
+
+        const Eigen::Vector3d v_prev = pose.v;
         pose.v += acc_lin * dt;
         pose.p += v_prev * dt + 0.5 * acc_lin * dt * dt;
 
         pose.t = s.t;
         trajectory_out.push_back(pose);
-        idx++;
+        ++idx;
     }
 }
 
@@ -186,7 +260,16 @@ void integrateImuRaw(const std::vector<ImuSample>& imu, double t0, double t1, Po
     trajectory_out.clear();
     trajectory_out.reserve(imu.size());
 
-    size_t idx = findStartIndex(imu, t0);
+    if (imu.empty()) {
+        return;
+    }
+
+    const ImuInitResult init = estimateInitialImuState(imu, t0, init_duration);
+    if (!init.valid) {
+        return;
+    }
+
+    size_t idx = init.end_idx;
     if (idx >= imu.size()) {
         return;
     }
@@ -194,30 +277,35 @@ void integrateImuRaw(const std::vector<ImuSample>& imu, double t0, double t1, Po
     pose.t = imu[idx].t;
     pose.p.setZero();
     pose.v.setZero();
-    pose.q = initialOrientationFromAccel(imu[idx].acc, gravity);
+    pose.q = initialOrientationFromAccel(init.avg_acc, gravity);
     pose.q.normalize();
+
+    const Eigen::Vector3d gyro_bias = init.avg_gyro;
 
     while (idx < imu.size() && imu[idx].t <= t1) {
         const ImuSample& s = imu[idx];
-        double dt = s.t - pose.t;
+        const double dt = s.t - pose.t;
+
         if (dt <= 0.0) {
-            idx++;
+            ++idx;
             continue;
         }
 
-        pose.q *= deltaQuat(s.gyro, dt);
+        const Eigen::Vector3d gyro_corr = s.gyro - gyro_bias;
+
+        pose.q *= deltaQuat(gyro_corr, dt);
         pose.q.normalize();
 
-        Eigen::Vector3d acc_world = pose.q * s.acc;
-        Eigen::Vector3d acc_lin = acc_world - gravity;
+        const Eigen::Vector3d acc_world = pose.q * s.acc;
+        const Eigen::Vector3d acc_lin = acc_world - gravity;
 
-        Eigen::Vector3d v_prev = pose.v;
+        const Eigen::Vector3d v_prev = pose.v;
         pose.v += acc_lin * dt;
         pose.p += v_prev * dt + 0.5 * acc_lin * dt * dt;
 
         pose.t = s.t;
         trajectory_out.push_back(pose);
-        idx++;
+        ++idx;
     }
 }
 
@@ -241,7 +329,14 @@ bool loadImuCsv(const std::string& path, std::vector<ImuSample>& out)
         double t_ns, gx, gy, gz, ax, ay, az;
         char comma;
 
-        ss >> t_ns >> comma >> gx >> comma >> gy >> comma >> gz >> comma >> ax >> comma >> ay >> comma >> az;
+        ss >> t_ns >> comma
+           >> gx >> comma
+           >> gy >> comma
+           >> gz >> comma
+           >> ax >> comma
+           >> ay >> comma
+           >> az;
+
         if (ss.fail()) {
             continue;
         }
@@ -249,7 +344,7 @@ bool loadImuCsv(const std::string& path, std::vector<ImuSample>& out)
         ImuSample s;
         s.t = t_ns * 1e-9;
         s.gyro = Eigen::Vector3d(gx, gy, gz);
-        s.acc = Eigen::Vector3d(ax, ay, az);
+        s.acc  = Eigen::Vector3d(ax, ay, az);
         out.push_back(s);
     }
 

@@ -1,5 +1,6 @@
 #include <vector>
 #include <Eigen/Dense>
+#include <Eigen/Geometry>
 #include <string>
 
 struct ImuSample {
