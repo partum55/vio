@@ -16,9 +16,27 @@ CustomShiTomasiDetector::CustomShiTomasiDetector(
 {
 }
 
+int CustomShiTomasiDetector::effectiveTaskCount(const cv::Size& size) const
+{
+    const int pixels = size.width * size.height;
+
+    if (pixels < 512 * 512)
+    {
+        return 1;
+    }
+
+    if (pixels < 1024 * 1024)
+    {
+        return std::min(num_tasks_, 4);
+    }
+
+    return std::max(1, num_tasks_);
+}
+
 cv::Mat CustomShiTomasiDetector::shiTomasiScoreImage(
     const cv::Mat& gray8,
-    const ShiTomasiParams& p)
+    const ShiTomasiParams& p,
+    int effective_tasks)
 {
     CV_Assert(gray8.type() == CV_8U);
 
@@ -28,17 +46,17 @@ cv::Mat CustomShiTomasiDetector::shiTomasiScoreImage(
     const int blurPasses = std::max(1, static_cast<int>(std::round(p.gaussianSigma)));
     for (int i = 0; i < blurPasses; ++i)
     {
-        gaussianBlurCustom(blur_, blur_tmp_, pool_, num_tasks_);
+        gaussianBlurCustom(blur_, blur_tmp_, pool_, effective_tasks);
         std::swap(blur_, blur_tmp_);
     }
 
-    centralDifferenceXY(blur_, Ix_, Iy_, pool_, num_tasks_);
+    centralDifferenceXY(blur_, Ix_, Iy_, pool_, effective_tasks);
 
     Ixx_.create(blur_.size(), CV_32F);
     Iyy_.create(blur_.size(), CV_32F);
     Ixy_.create(blur_.size(), CV_32F);
 
-    parallel_for_rows(pool_, blur_.rows, num_tasks_,
+    parallel_for_rows(pool_, blur_.rows, effective_tasks,
         [&](int y0, int y1)
         {
             for (int y = y0; y < y1; ++y)
@@ -64,19 +82,19 @@ cv::Mat CustomShiTomasiDetector::shiTomasiScoreImage(
     const int tensorPasses = std::max(1, p.blockSize / 2);
     for (int i = 0; i < tensorPasses; ++i)
     {
-        gaussianBlurCustom(Ixx_, tensor_tmp_, pool_, num_tasks_);
+        gaussianBlurCustom(Ixx_, tensor_tmp_, pool_, effective_tasks);
         std::swap(Ixx_, tensor_tmp_);
 
-        gaussianBlurCustom(Iyy_, tensor_tmp_, pool_, num_tasks_);
+        gaussianBlurCustom(Iyy_, tensor_tmp_, pool_, effective_tasks);
         std::swap(Iyy_, tensor_tmp_);
 
-        gaussianBlurCustom(Ixy_, tensor_tmp_, pool_, num_tasks_);
+        gaussianBlurCustom(Ixy_, tensor_tmp_, pool_, effective_tasks);
         std::swap(Ixy_, tensor_tmp_);
     }
 
     score_.create(blur_.size(), CV_32F);
 
-    parallel_for_rows(pool_, blur_.rows, num_tasks_,
+    parallel_for_rows(pool_, blur_.rows, effective_tasks,
         [&](int y0, int y1)
         {
             for (int y = y0; y < y1; ++y)
@@ -101,18 +119,66 @@ cv::Mat CustomShiTomasiDetector::shiTomasiScoreImage(
     return score_;
 }
 
-cv::Mat CustomShiTomasiDetector::nmsLocalMax(const cv::Mat& score, int r)
+cv::Mat CustomShiTomasiDetector::nmsLocalMax(
+    const cv::Mat& score,
+    int r,
+    int effective_tasks)
 {
-    cv::Mat kernel = cv::getStructuringElement(
-        cv::MORPH_RECT,
-        cv::Size(2 * r + 1, 2 * r + 1));
+    CV_Assert(score.type() == CV_32F);
 
-    cv::dilate(score, dilated_, kernel);
+    if (r <= 0)
+    {
+        return score.clone();
+    }
 
-    cv::Mat isMax = (score == dilated_);
+    cv::Mat out(score.size(), CV_32F, cv::Scalar(0));
 
-    cv::Mat out = cv::Mat::zeros(score.size(), score.type());
-    score.copyTo(out, isMax);
+    parallel_for_rows(pool_, score.rows, effective_tasks,
+        [&](int y0, int y1)
+        {
+            for (int y = y0; y < y1; ++y)
+            {
+                float* dst = out.ptr<float>(y);
+
+                for (int x = 0; x < score.cols; ++x)
+                {
+                    const float center = score.at<float>(y, x);
+                    if (center <= 0.0f)
+                    {
+                        dst[x] = 0.0f;
+                        continue;
+                    }
+
+                    bool isMax = true;
+
+                    for (int yy = std::max(0, y - r);
+                         yy <= std::min(score.rows - 1, y + r) && isMax;
+                         ++yy)
+                    {
+                        const float* row = score.ptr<float>(yy);
+
+                        for (int xx = std::max(0, x - r);
+                             xx <= std::min(score.cols - 1, x + r);
+                             ++xx)
+                        {
+                            if (yy == y && xx == x)
+                            {
+                                continue;
+                            }
+
+                            if (row[xx] > center)
+                            {
+                                isMax = false;
+                                break;
+                            }
+                        }
+                    }
+
+                    dst[x] = isMax ? center : 0.0f;
+                }
+            }
+        });
+
     return out;
 }
 
@@ -138,7 +204,7 @@ std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
     const float thresh = static_cast<float>(p.qualityLevel * maxVal);
 
     std::vector<Candidate> cand;
-    cand.reserve(scoreNms.rows * scoreNms.cols / 32);
+    cand.reserve(scoreNms.rows * scoreNms.cols / 40);
 
     for (int y = 0; y < scoreNms.rows; ++y)
     {
@@ -167,7 +233,7 @@ std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
 
     const size_t keepCount = std::min<size_t>(
         cand.size(),
-        std::max<size_t>(static_cast<size_t>(p.maxCorners) * 8,
+        std::max<size_t>(static_cast<size_t>(p.maxCorners) * 4,
                          static_cast<size_t>(p.maxCorners)));
 
     auto byScoreDesc = [](const Candidate& a, const Candidate& b)
@@ -221,6 +287,7 @@ std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
             for (int nnx = std::max(0, gx - 1); nnx <= std::min(gridCols - 1, gx + 1); ++nnx)
             {
                 const auto& bucket = grid[gridIndex(nnx, nny)];
+
                 for (int idx : bucket)
                 {
                     const cv::Point2f& chosen = pts[idx];
@@ -270,12 +337,29 @@ std::vector<cv::Point2f> CustomShiTomasiDetector::detect(
     const cv::Mat& allowedMask)
 {
     cv::Mat gray = toGrayU8(img);
+    return detectGray(gray, params, allowedMask);
+}
 
+std::vector<cv::Point2f> CustomShiTomasiDetector::detectGray(
+    const cv::Mat& gray,
+    const ShiTomasiParams& params)
+{
+    return detectGray(gray, params, cv::Mat());
+}
+
+std::vector<cv::Point2f> CustomShiTomasiDetector::detectGray(
+    const cv::Mat& gray,
+    const ShiTomasiParams& params,
+    const cv::Mat& allowedMask)
+{
+    CV_Assert(gray.type() == CV_8U);
     CV_Assert(allowedMask.empty() ||
               (allowedMask.type() == CV_8U && allowedMask.size() == gray.size()));
 
-    cv::Mat score = shiTomasiScoreImage(gray, params);
-    cv::Mat scoreNms = nmsLocalMax(score, params.nmsRadius);
+    const int effective_tasks = effectiveTaskCount(gray.size());
+
+    cv::Mat score = shiTomasiScoreImage(gray, params, effective_tasks);
+    cv::Mat scoreNms = nmsLocalMax(score, params.nmsRadius, effective_tasks);
 
     return selectWithGrid(scoreNms, params, allowedMask);
 }
@@ -345,11 +429,11 @@ cv::Mat drawKeypointsOnImage(
         vis = imgBgrOrGray.clone();
     }
 
-    for (const auto& p : pts)
+    for (const auto& pt : pts)
     {
         cv::circle(
             vis,
-            p,
+            pt,
             radius,
             cv::Scalar(0, 255, 0),
             thickness,

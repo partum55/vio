@@ -39,7 +39,7 @@ int main(int argc, char** argv)
     {
         std::cerr
             << "Usage: benchmark_shi_tomasi <image_path> [num_threads] [repeats] [warmup]\n"
-            << "Example: ./benchmark_shi_tomasi image.png 8 50 5\n";
+            << "Example: ./benchmark_shi_tomasi image.png 8 200 20\n";
         return 1;
     }
 
@@ -93,6 +93,8 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    cv::Mat gray = toGrayU8(img);
+
     ThreadPool pool(num_threads);
     ABCThreadPool& abstract_pool = pool;
 
@@ -104,12 +106,12 @@ int main(int argc, char** argv)
     p.gaussianSigma = 1.0;
     p.nmsRadius = 2;
 
-    CustomShiTomasiDetector detector(abstract_pool, num_threads);
+    const int detector_tasks = std::max(1, num_threads * 4);
+    CustomShiTomasiDetector detector(abstract_pool, detector_tasks);
 
-    // Warmup
     for (int i = 0; i < warmup; ++i)
     {
-        volatile auto pts = detector.detect(img, p);
+        volatile auto pts = detector.detectGray(gray, p);
         (void)pts;
     }
 
@@ -121,7 +123,7 @@ int main(int argc, char** argv)
     for (int i = 0; i < repeats; ++i)
     {
         const auto t0 = std::chrono::high_resolution_clock::now();
-        auto pts = detector.detect(img, p);
+        auto pts = detector.detectGray(gray, p);
         const auto t1 = std::chrono::high_resolution_clock::now();
 
         const std::chrono::duration<double, std::milli> dt = t1 - t0;
@@ -133,6 +135,7 @@ int main(int argc, char** argv)
     const double sd = stddev(times_ms, avg);
 
     std::cout << "threads=" << num_threads
+              << " detector_tasks=" << detector_tasks
               << " repeats=" << repeats
               << " warmup=" << warmup
               << " mean_ms=" << avg

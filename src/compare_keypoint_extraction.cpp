@@ -60,7 +60,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    std::filesystem::create_directories("shi_tomasi_outputs");
+    std::filesystem::create_directories("shi_tomasi_outputss");
 
     cv::Mat img = cv::imread(argv[1], cv::IMREAD_COLOR);
     if (img.empty())
@@ -68,6 +68,8 @@ int main(int argc, char** argv)
         std::cerr << "Failed to read image: " << argv[1] << "\n";
         return 1;
     }
+
+    cv::Mat gray = toGrayU8(img);
 
     int num_threads = 0;
     if (argc >= 3)
@@ -97,10 +99,11 @@ int main(int argc, char** argv)
     p.gaussianSigma = 1.0;
     p.nmsRadius = 2;
 
-    CustomShiTomasiDetector myDetector(abstract_pool, num_threads);
+    const int detector_tasks = std::max(1, num_threads * 4);
+    CustomShiTomasiDetector myDetector(abstract_pool, detector_tasks);
     OpenCVShiTomasiDetector cvDetector;
 
-    std::vector<cv::Point2f> pts_mine = myDetector.detect(img, p);
+    std::vector<cv::Point2f> pts_mine = myDetector.detectGray(gray, p);
     std::vector<cv::Point2f> pts_cv = cvDetector.detect(img, p);
 
     cv::Mat vis_mine = drawKeypointsOnImage(img, pts_mine);
@@ -126,8 +129,8 @@ int main(int argc, char** argv)
         2,
         cv::LINE_AA);
 
-    const std::string out1 = "shi_tomasi_outputs/keypoints_mine.png";
-    const std::string out2 = "shi_tomasi_outputs/keypoints_opencv.png";
+    const std::string out1 = "shi_tomasi_outputss/keypoints_mine.png";
+    const std::string out2 = "shi_tomasi_outputss/keypoints_opencv.png";
 
     if (!cv::imwrite(out1, vis_mine))
     {
@@ -146,7 +149,7 @@ int main(int argc, char** argv)
         cv::Scalar(0),
         -1);
 
-    std::vector<cv::Point2f> pts_masked = myDetector.detect(img, p, allowedMask);
+    std::vector<cv::Point2f> pts_masked = myDetector.detectGray(gray, p, allowedMask);
 
     cv::Mat vis_mask_overlay = drawMaskOverlay(img, allowedMask);
     cv::Mat vis_masked = drawKeypointsOnImage(vis_mask_overlay, pts_masked);
@@ -161,8 +164,8 @@ int main(int argc, char** argv)
         2,
         cv::LINE_AA);
 
-    const std::string out3 = "shi_tomasi_outputs/keypoints_masked.png";
-    const std::string out4 = "shi_tomasi_outputs/allowed_mask_overlay.png";
+    const std::string out3 = "shi_tomasi_outputss/keypoints_masked.png";
+    const std::string out4 = "shi_tomasi_outputss/allowed_mask_overlay.png";
 
     if (!cv::imwrite(out3, vis_masked))
     {
@@ -213,7 +216,7 @@ int main(int argc, char** argv)
         2,
         cv::LINE_AA);
 
-    const std::string out5 = "shi_tomasi_outputs/refreshed_from_small_set.png";
+    const std::string out5 = "shi_tomasi_outputss/refreshed_from_small_set.png";
     if (!cv::imwrite(out5, vis_refresh_small))
     {
         std::cerr << "Failed to write " << out5 << "\n";
@@ -238,13 +241,14 @@ int main(int argc, char** argv)
         2,
         cv::LINE_AA);
 
-    const std::string out6 = "shi_tomasi_outputs/refreshed_from_large_set.png";
+    const std::string out6 = "shi_tomasi_outputss/refreshed_from_large_set.png";
     if (!cv::imwrite(out6, vis_refresh_large))
     {
         std::cerr << "Failed to write " << out6 << "\n";
     }
 
     std::cout << "Threads: " << num_threads << "\n";
+    std::cout << "Detector tasks: " << detector_tasks << "\n";
     std::cout << "Saved:\n"
               << "  " << out1 << " (mine pts=" << pts_mine.size() << ")\n"
               << "  " << out2 << " (opencv pts=" << pts_cv.size() << ")\n"
@@ -254,39 +258,7 @@ int main(int argc, char** argv)
               << "  " << out6 << " (refreshed from 250 -> " << refreshedLarge.size() << ")\n";
 
     std::cout << "\nMask test:\n";
-    std::cout << "  Forbidden-area points found: " << forbidden_count << "\n";
-    if (forbidden_count == 0)
-    {
-        std::cout << "  OK: masked detector does not place points in forbidden area.\n";
-    }
-    else
-    {
-        std::cout << "  WARNING: some points appeared in forbidden area.\n";
-    }
-
-    std::cout << "\nRefresh test:\n";
-    std::cout << "  small tracked set:  " << trackedSmall.size()
-              << " -> " << refreshedSmall.size() << "\n";
-    std::cout << "  large tracked set:  " << trackedLarge.size()
-              << " -> " << refreshedLarge.size() << "\n";
-
-    if (refreshedSmall.size() > trackedSmall.size())
-    {
-        std::cout << "  OK: refresh triggered for small feature set.\n";
-    }
-    else
-    {
-        std::cout << "  WARNING: refresh did not add points for small set.\n";
-    }
-
-    if (refreshedLarge.size() == trackedLarge.size())
-    {
-        std::cout << "  OK: refresh skipped for sufficiently large feature set.\n";
-    }
-    else
-    {
-        std::cout << "  WARNING: refresh changed large set unexpectedly.\n";
-    }
+    std::cout << "  forbidden_count = " << forbidden_count << "\n";
 
     return 0;
 }

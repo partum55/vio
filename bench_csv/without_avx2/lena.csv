@@ -1,0 +1,5 @@
+threads,detector_tasks,repeats,warmup,mean_ms,std_ms,avg_points,image,image_path,size_bytes,mean_s,std_s,speedup,efficiency,time_reduction,scaling_quality,karp_flatt,amdahl_serial_fraction,amdahl_speedup_pred
+1,4,100,5,25.886,1.538,400.0,lena.jpg,/mnt/d/UCU/акс/project/vio/tests/lena.jpg,44510,0.025886,0.001538,1.0,1.0,0.0,1.0,0.0,0.0,1.0
+2,8,100,5,19.159,1.446,400.0,lena.jpg,/mnt/d/UCU/акс/project/vio/tests/lena.jpg,44510,0.019159,0.001446,1.351114,0.675557,0.25987,0.351114,0.48026,0.48026,1.29192
+4,16,100,5,15.597,1.458,400.0,lena.jpg,/mnt/d/UCU/акс/project/vio/tests/lena.jpg,44510,0.015597,0.0014579999999999999,1.659678,0.41492,0.397474,0.219893,0.470035,0.470035,1.512715
+8,32,100,5,15.65,1.599,400.0,lena.jpg,/mnt/d/UCU/акс/project/vio/tests/lena.jpg,44510,0.01565,0.001599,1.654058,0.206757,0.395426,0.093437,0.548084,0.548084,1.654059

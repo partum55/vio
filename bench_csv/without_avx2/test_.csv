@@ -1,0 +1,5 @@
+threads,detector_tasks,repeats,warmup,mean_ms,std_ms,avg_points,image,image_path,size_bytes,mean_s,std_s,speedup,efficiency,time_reduction,scaling_quality,karp_flatt,amdahl_serial_fraction,amdahl_speedup_pred
+1,4,100,5,408.348,14.123,500.0,test_.jpg,/mnt/d/UCU/акс/project/vio/tests/test_.jpg,18615341,0.408348,0.014123,1.0,1.0,0.0,1.0,0.0,0.0,1.0
+2,8,100,5,210.603,9.539,500.0,test_.jpg,/mnt/d/UCU/акс/project/vio/tests/test_.jpg,18615341,0.210603,0.009538999999999999,1.938947,0.969474,0.484256,0.938947,0.031488,0.031488,1.712074
+4,12,100,5,133.221,7.289,500.0,test_.jpg,/mnt/d/UCU/акс/project/vio/tests/test_.jpg,18615341,0.133221,0.0072889999999999995,3.065192,0.766298,0.673756,0.688397,0.101658,0.101658,2.658652
+8,16,100,5,111.133,6.933,500.0,test_.jpg,/mnt/d/UCU/акс/project/vio/tests/test_.jpg,18615341,0.111133,0.006933,3.674408,0.459301,0.727847,0.382058,0.168174,0.168174,3.674414
