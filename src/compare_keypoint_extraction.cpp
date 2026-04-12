@@ -92,12 +92,12 @@ int main(int argc, char** argv)
     ABCThreadPool& abstract_pool = pool;
 
     ShiTomasiParams p;
-    p.maxCorners = 500;
-    p.qualityLevel = 0.01;
-    p.minDistance = 10.0;
-    p.blockSize = 5;
+    p.maxCorners = 800;
+    p.qualityLevel = 0.001;
+    p.minDistance = 5.0;
+    p.blockSize = 3;
     p.gaussianSigma = 1.0;
-    p.nmsRadius = 2;
+    p.nmsRadius = 1;
 
     const int detector_tasks = std::max(1, num_threads * 4);
     CustomShiTomasiDetector myDetector(abstract_pool, detector_tasks);
@@ -106,8 +106,12 @@ int main(int argc, char** argv)
     std::vector<cv::Point2f> pts_mine = myDetector.detectGray(gray, p);
     std::vector<cv::Point2f> pts_cv = cvDetector.detect(img, p);
 
-    cv::Mat vis_mine = drawKeypointsOnImage(img, pts_mine);
-    cv::Mat vis_cv = drawKeypointsOnImage(img, pts_cv);
+    std::cout << "mine: " << pts_mine.size() << "\n";
+    std::cout << "opencv: " << pts_cv.size() << "\n";
+    cv::imwrite("shi_tomasi_outputss/debug_gray.png", gray);
+
+    cv::Mat vis_mine = drawKeypointsOnImage(img, pts_mine, 5, 2);
+    cv::Mat vis_cv = drawKeypointsOnImage(img, pts_cv, 5, 2);
 
     cv::putText(
         vis_mine,
@@ -152,7 +156,7 @@ int main(int argc, char** argv)
     std::vector<cv::Point2f> pts_masked = myDetector.detectGray(gray, p, allowedMask);
 
     cv::Mat vis_mask_overlay = drawMaskOverlay(img, allowedMask);
-    cv::Mat vis_masked = drawKeypointsOnImage(vis_mask_overlay, pts_masked);
+    cv::Mat vis_masked = drawKeypointsOnImage(vis_mask_overlay, pts_masked, 5, 2);
 
     cv::putText(
         vis_masked,
@@ -205,7 +209,7 @@ int main(int argc, char** argv)
         p,
         refreshParams);
 
-    cv::Mat vis_refresh_small = drawKeypointsOnImage(img, refreshedSmall);
+    cv::Mat vis_refresh_small = drawKeypointsOnImage(img, refreshedSmall, 5, 2);
     cv::putText(
         vis_refresh_small,
         "Refresh triggered (start=50)",
@@ -230,7 +234,7 @@ int main(int argc, char** argv)
         p,
         refreshParams);
 
-    cv::Mat vis_refresh_large = drawKeypointsOnImage(img, refreshedLarge);
+    cv::Mat vis_refresh_large = drawKeypointsOnImage(img, refreshedLarge, 5, 2);
     cv::putText(
         vis_refresh_large,
         "Refresh skipped (start=250)",

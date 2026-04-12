@@ -199,7 +199,20 @@ std::vector<cv::Point2f> CustomShiTomasiDetector::selectWithGrid(
 
     double minVal = 0.0;
     double maxVal = 0.0;
-    cv::minMaxLoc(scoreNms, &minVal, &maxVal);
+
+    if (allowedMask.empty())
+    {
+        cv::minMaxLoc(scoreNms, &minVal, &maxVal);
+    }
+    else
+    {
+        cv::minMaxLoc(scoreNms, &minVal, &maxVal, nullptr, nullptr, allowedMask);
+    }
+
+    if (maxVal <= 0.0)
+    {
+        return {};
+    }
 
     const float thresh = static_cast<float>(p.qualityLevel * maxVal);
 
