@@ -8,11 +8,12 @@
 #include "tracking/lk_tracker.hpp"
 #include "tracking/tracking_vis.hpp"
 #include "tracking/feature_refresh.hpp"
+#include "io/landmark_output_writer.hpp"
+#include "triangulation/extrinsics.hpp"
 
 #include <opencv2/opencv.hpp>
 
 #include <iostream>
-#include <stdexcept>
 
 void ImuTrackingPipeline::setImuCsvPath(const std::string& path)
 {
@@ -49,6 +50,11 @@ void ImuTrackingPipeline::setGravity(const Eigen::Vector3d& gravity)
     gravity_ = gravity;
 }
 
+void ImuTrackingPipeline::setCameraIntrinsics(const CameraIntrinsics& intrinsics)
+{
+    camera_intrinsics_ = intrinsics;
+}
+
 void ImuTrackingPipeline::setTrackingParams(
     int win_size,
     int max_level,
@@ -77,6 +83,11 @@ const std::vector<Pose>& ImuTrackingPipeline::imuTrajectory() const
     return imu_trajectory_;
 }
 
+void ImuTrackingPipeline::setCameraExtrinsics(const RigidTransform& T_bs)
+{
+    T_bs_ = T_bs;
+}
+
 bool ImuTrackingPipeline::loadInputs()
 {
     image_paths_ = loadImagePaths(images_dir_, ".png");
@@ -85,16 +96,27 @@ bool ImuTrackingPipeline::loadInputs()
         return false;
     }
 
+    std::cout << "Loaded images: " << image_paths_.size() << "\n";
+
     image_paths_ = loadImagePaths(images_dir_, ".png");
     if (image_paths_.empty()) {
         std::cerr << "No images loaded from: " << images_dir_ << "\n";
         return false;
     }
 
-    frame_timestamps_ = loadImageTimestampsFromFilenames(image_paths_);
+    if (!frame_timestamps_path_.empty()) {
+    frame_timestamps_ = loadImageTimestampsFromFile(frame_timestamps_path_);
     if (frame_timestamps_.empty()) {
-        std::cerr << "Failed to load timestamps from image filenames\n";
+        std::cerr << "Failed to load frame timestamps from file: "
+                  << frame_timestamps_path_ << "\n";
         return false;
+    }
+    } else {
+        frame_timestamps_ = loadImageTimestampsFromFilenames(image_paths_);
+        if (frame_timestamps_.empty()) {
+            std::cerr << "Failed to load timestamps from image filenames\n";
+            return false;
+        }
     }
 
 
@@ -142,6 +164,21 @@ void ImuTrackingPipeline::initializeTracks(const cv::Mat& first_gray)
     (void)first_gray;
 }
 
+void ImuTrackingPipeline::setTriangulationParams(const TriangulationParams& params)
+{
+    triangulation_params_ = params;
+}
+
+const std::vector<vio::Landmark>& ImuTrackingPipeline::landmarks() const
+{
+    return landmarks_;
+}
+
+void ImuTrackingPipeline::setOutputLandmarksCsv(const std::string& path)
+{
+    output_landmarks_csv_ = path;
+}
+
 void ImuTrackingPipeline::appendFrame(
     int frame_id,
     double timestamp,
@@ -149,7 +186,16 @@ void ImuTrackingPipeline::appendFrame(
 )
 {
     vio::TrackedFrame frame;
+
     frame.state = buildFrameStateFromImu(frame_id, timestamp, imu_trajectory_);
+
+    const Eigen::Matrix3d R_wb = frame.state.q_wc.toRotationMatrix();
+const Eigen::Vector3d t_wb = frame.state.t_wc;
+
+frame.state.q_wc = Eigen::Quaterniond(R_wb);
+frame.state.q_wc.normalize();
+frame.state.t_wc = t_wb;
+
     frame.observations.reserve(tracks.size());
 
     for (const auto& t : tracks) {
@@ -164,6 +210,28 @@ void ImuTrackingPipeline::appendFrame(
     sequence_.push_back(std::move(frame));
 }
 
+bool ImuTrackingPipeline::runTriangulation()
+{
+    if (sequence_.empty()) {
+        std::cerr << "Sequence is empty, cannot triangulate landmarks\n";
+        return false;
+    }
+
+    if (!camera_intrinsics_.isValid()) {
+        std::cerr << "Camera intrinsics are invalid\n";
+        return false;
+    }
+
+    landmarks_ = triangulateLandmarks(
+        sequence_,
+        camera_intrinsics_,
+        triangulation_params_
+    );
+
+    std::cout << "Triangulated landmarks: " << landmarks_.size() << "\n";
+    return true;
+}
+
 bool ImuTrackingPipeline::runTrackingAndSync()
 {
     if (image_paths_.empty() || frame_timestamps_.empty()) {
@@ -171,9 +239,35 @@ bool ImuTrackingPipeline::runTrackingAndSync()
         return false;
     }
 
-    cv::Mat first_frame = cv::imread(image_paths_[0], cv::IMREAD_COLOR);
+    if (imu_trajectory_.empty()) {
+        std::cerr << "IMU trajectory is empty\n";
+        return false;
+    }
+
+    const double t_min = imu_trajectory_.front().t;
+    const double t_max = imu_trajectory_.back().t;
+
+    size_t start_idx = 0;
+    while (start_idx < frame_timestamps_.size() &&
+           frame_timestamps_[start_idx] < t_min) {
+        ++start_idx;
+    }
+
+    size_t end_idx = frame_timestamps_.size();
+    while (end_idx > start_idx &&
+           frame_timestamps_[end_idx - 1] > t_max) {
+        --end_idx;
+    }
+
+    if (start_idx >= end_idx) {
+        std::cerr << "No overlapping time range between frames and IMU\n";
+        return false;
+    }
+ end_idx = std::min(end_idx, start_idx + 120);
+
+    cv::Mat first_frame = cv::imread(image_paths_[start_idx], cv::IMREAD_COLOR);
     if (first_frame.empty()) {
-        std::cerr << "Failed to read first image: " << image_paths_[0] << "\n";
+        std::cerr << "Failed to read first image: " << image_paths_[start_idx] << "\n";
         return false;
     }
 
@@ -222,11 +316,16 @@ bool ImuTrackingPipeline::runTrackingAndSync()
     refresh_params.minDistance = 10.0;
 
     sequence_.clear();
-    appendFrame(0, frame_timestamps_[0], tracks);
+
+    appendFrame(
+        static_cast<int>(start_idx),
+        frame_timestamps_[start_idx],
+        tracks
+    );
 
     writer.write(drawTrackingVisualization(first_frame, tracks));
 
-    for (size_t img_idx = 1; img_idx < image_paths_.size(); ++img_idx) {
+    for (size_t img_idx = start_idx + 1; img_idx < end_idx; ++img_idx) {
         cv::Mat curr_frame = cv::imread(image_paths_[img_idx], cv::IMREAD_COLOR);
         if (curr_frame.empty()) {
             std::cerr << "Failed to read image: " << image_paths_[img_idx] << "\n";
@@ -280,7 +379,11 @@ bool ImuTrackingPipeline::runTrackingAndSync()
 
         refreshTracksIfNeeded(curr_gray, tracks, next_track_id, refresh_params);
 
-        appendFrame(static_cast<int>(img_idx), frame_timestamps_[img_idx], tracks);
+        appendFrame(
+            static_cast<int>(img_idx),
+            frame_timestamps_[img_idx],
+            tracks
+        );
 
         writer.write(drawTrackingVisualization(curr_frame, tracks, 15));
 
@@ -294,6 +397,35 @@ bool ImuTrackingPipeline::runTrackingAndSync()
 
     writer.release();
 
+    return true;
+}
+
+bool ImuTrackingPipeline::run()
+{
+    sequence_.clear();
+    imu_trajectory_.clear();
+    landmarks_.clear();
+
+    std::cout << "STEP 1: loadInputs\n";
+    if (!loadInputs()) {
+        return false;
+    }
+
+    std::cout << "STEP 2: runImu\n";
+    if (!runImu()) {
+        return false;
+    }
+
+    std::cout << "STEP 3: runTrackingAndSync\n";
+    if (!runTrackingAndSync()) {
+        return false;
+    }
+
+    std::cout << "STEP 4: runTriangulation\n";
+    if (!runTriangulation()) {
+        return false;
+    }
+
     if (!writeFrameStatesCsv(output_poses_csv_, sequence_)) {
         std::cerr << "Failed to write poses CSV: " << output_poses_csv_ << "\n";
         return false;
@@ -304,20 +436,8 @@ bool ImuTrackingPipeline::runTrackingAndSync()
         return false;
     }
 
-    return true;
-}
-
-bool ImuTrackingPipeline::run()
-{
-    if (!loadInputs()) {
-        return false;
-    }
-
-    if (!runImu()) {
-        return false;
-    }
-
-    if (!runTrackingAndSync()) {
+    if (!writeLandmarksCsv(output_landmarks_csv_, landmarks_)) {
+        std::cerr << "Failed to write landmarks CSV: " << output_landmarks_csv_ << "\n";
         return false;
     }
 

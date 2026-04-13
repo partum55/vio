@@ -1,5 +1,7 @@
 #pragma once
+
 #include "core/tracked_frame.hpp"
+
 #include <string>
 #include <vector>
 

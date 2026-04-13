@@ -2,13 +2,14 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
-#include <iomanip>
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <string>
 
 namespace
 {
-    constexpr double init_duration = 2.0; 
+    constexpr double init_duration = 2.0;
     constexpr double epsilon = 1e-12;
 
     struct ImuInitResult
@@ -32,18 +33,25 @@ Eigen::Quaterniond deltaQuat(const Eigen::Vector3d& omega, double dt)
     return Eigen::Quaterniond(Eigen::AngleAxisd(angle, axis));
 }
 
-Eigen::Quaterniond initialOrientationFromAccel(const Eigen::Vector3d& acc_meas, const Eigen::Vector3d& gravity_world)
+Eigen::Quaterniond initialOrientationFromAccel(
+    const Eigen::Vector3d& acc_meas,
+    const Eigen::Vector3d& gravity_world
+)
 {
     if (acc_meas.norm() < epsilon || gravity_world.norm() < epsilon) {
         return Eigen::Quaterniond(1.0, 0.0, 0.0, 0.0);
     }
 
-    Eigen::Quaterniond q = Eigen::Quaterniond::FromTwoVectors(acc_meas.normalized(), gravity_world.normalized());
+    Eigen::Quaterniond q = Eigen::Quaterniond::FromTwoVectors(
+        acc_meas.normalized(),
+        gravity_world.normalized()
+    );
     q.normalize();
     return q;
 }
 
-class Kalman {
+class Kalman
+{
 public:
     Eigen::Vector2d mu;
     Eigen::Matrix2d Sigma;
@@ -55,13 +63,15 @@ public:
         : sigma_meas(sigma_meas_), q_process(q_process_)
     {
         mu << 0.0, 0.0;
-        Sigma << 1.0, 0.0, 0.0, 1.0;
+        Sigma << 1.0, 0.0,
+                 0.0, 1.0;
     }
 
     void init(double first_measurement)
     {
         mu << first_measurement, 0.0;
-        Sigma << sigma_meas * sigma_meas, 0.0, 0.0, 1.0;
+        Sigma << sigma_meas * sigma_meas, 0.0,
+                 0.0, 1.0;
     }
 
     void predict(double dt)
@@ -71,7 +81,8 @@ public:
              0.0, 1.0;
 
         Eigen::Matrix2d Q;
-        Q << dt * dt * dt / 3.0, dt * dt / 2.0, dt * dt / 2.0, dt;
+        Q << dt * dt * dt / 3.0, dt * dt / 2.0,
+             dt * dt / 2.0,       dt;
 
         Q *= q_process;
 
@@ -84,13 +95,13 @@ public:
         Eigen::RowVector2d H;
         H << 1.0, 0.0;
 
-        double R = sigma_meas * sigma_meas;
-        double innovation = z_meas - (H * mu)(0);
-        double S = (H * Sigma * H.transpose())(0, 0) + R;
-        Eigen::Vector2d K = Sigma * H.transpose() / S;
+        const double R = sigma_meas * sigma_meas;
+        const double innovation = z_meas - (H * mu)(0);
+        const double S = (H * Sigma * H.transpose())(0, 0) + R;
+        const Eigen::Vector2d K = Sigma * H.transpose() / S;
 
         mu = mu + K * innovation;
-        Eigen::Matrix2d I = Eigen::Matrix2d::Identity();
+        const Eigen::Matrix2d I = Eigen::Matrix2d::Identity();
         Sigma = (I - K * H) * Sigma * (I - K * H).transpose() + K * R * K.transpose();
 
         return mu(0);
@@ -106,7 +117,11 @@ static size_t findStartIndex(const std::vector<ImuSample>& imu, double t0)
     return idx;
 }
 
-static ImuInitResult estimateInitialImuState(const std::vector<ImuSample>& imu, double t0, double init_duration_sec)
+static ImuInitResult estimateInitialImuState(
+    const std::vector<ImuSample>& imu,
+    double t0,
+    double init_duration_sec
+)
 {
     ImuInitResult result;
 
@@ -146,7 +161,14 @@ static ImuInitResult estimateInitialImuState(const std::vector<ImuSample>& imu, 
     return result;
 }
 
-void integrateImuFiltered(const std::vector<ImuSample>& imu, double t0, double t1, Pose& pose, const Eigen::Vector3d& gravity, std::vector<Pose>& trajectory_out)
+void integrateImuFiltered(
+    const std::vector<ImuSample>& imu,
+    double t0,
+    double t1,
+    Pose& pose,
+    const Eigen::Vector3d& gravity,
+    std::vector<Pose>& trajectory_out
+)
 {
     trajectory_out.clear();
     trajectory_out.reserve(imu.size());
@@ -172,6 +194,9 @@ void integrateImuFiltered(const std::vector<ImuSample>& imu, double t0, double t
     pose.q.normalize();
 
     const Eigen::Vector3d gyro_bias = init.avg_gyro;
+
+    const Eigen::Vector3d gravity_body_expected = pose.q.conjugate() * gravity;
+    const Eigen::Vector3d accel_bias = init.avg_acc - gravity_body_expected;
 
     const double gyro_noise_density  = 1.6968e-04;
     const double gyro_random_walk    = 1.9393e-05;
@@ -197,7 +222,7 @@ void integrateImuFiltered(const std::vector<ImuSample>& imu, double t0, double t
     Kalman kf_az(accel_sigma, accel_q);
 
     const Eigen::Vector3d gyro0 = imu[idx].gyro - gyro_bias;
-    const Eigen::Vector3d acc0  = imu[idx].acc;
+    const Eigen::Vector3d acc0  = imu[idx].acc - accel_bias;
 
     kf_gx.init(gyro0.x());
     kf_gy.init(gyro0.y());
@@ -206,6 +231,11 @@ void integrateImuFiltered(const std::vector<ImuSample>& imu, double t0, double t
     kf_ax.init(acc0.x());
     kf_ay.init(acc0.y());
     kf_az.init(acc0.z());
+
+    int debug_samples_printed = 0;
+
+    Eigen::Vector3d acc_lin_sum = Eigen::Vector3d::Zero();
+    int acc_lin_count = 0;
 
     while (idx < imu.size() && imu[idx].t <= t1) {
         const ImuSample& s = imu[idx];
@@ -225,7 +255,7 @@ void integrateImuFiltered(const std::vector<ImuSample>& imu, double t0, double t
         kf_az.predict(dt);
 
         const Eigen::Vector3d gyro_meas = s.gyro - gyro_bias;
-        const Eigen::Vector3d acc_meas  = s.acc;
+        const Eigen::Vector3d acc_meas  = s.acc - accel_bias;
 
         Eigen::Vector3d gyro_filtered;
         Eigen::Vector3d acc_filtered;
@@ -242,8 +272,12 @@ void integrateImuFiltered(const std::vector<ImuSample>& imu, double t0, double t
         pose.q.normalize();
 
         const Eigen::Vector3d acc_world = pose.q * acc_filtered;
-
         const Eigen::Vector3d acc_lin = acc_world - gravity;
+
+        if (acc_lin_count < 200) {
+            acc_lin_sum += acc_lin;
+            ++acc_lin_count;
+        }
 
         const Eigen::Vector3d v_prev = pose.v;
         pose.v += acc_lin * dt;
@@ -251,11 +285,19 @@ void integrateImuFiltered(const std::vector<ImuSample>& imu, double t0, double t
 
         pose.t = s.t;
         trajectory_out.push_back(pose);
+
         ++idx;
     }
 }
 
-void integrateImuRaw(const std::vector<ImuSample>& imu, double t0, double t1, Pose& pose, const Eigen::Vector3d& gravity, std::vector<Pose>& trajectory_out)
+void integrateImuRaw(
+    const std::vector<ImuSample>& imu,
+    double t0,
+    double t1,
+    Pose& pose,
+    const Eigen::Vector3d& gravity,
+    std::vector<Pose>& trajectory_out
+)
 {
     trajectory_out.clear();
     trajectory_out.reserve(imu.size());
@@ -281,6 +323,12 @@ void integrateImuRaw(const std::vector<ImuSample>& imu, double t0, double t1, Po
     pose.q.normalize();
 
     const Eigen::Vector3d gyro_bias = init.avg_gyro;
+    const Eigen::Vector3d gravity_body_expected = pose.q.conjugate() * gravity;
+    const Eigen::Vector3d accel_bias = init.avg_acc - gravity_body_expected;
+
+    int debug_samples_printed = 0;
+    Eigen::Vector3d acc_lin_sum = Eigen::Vector3d::Zero();
+    int acc_lin_count = 0;
 
     while (idx < imu.size() && imu[idx].t <= t1) {
         const ImuSample& s = imu[idx];
@@ -292,12 +340,18 @@ void integrateImuRaw(const std::vector<ImuSample>& imu, double t0, double t1, Po
         }
 
         const Eigen::Vector3d gyro_corr = s.gyro - gyro_bias;
+        const Eigen::Vector3d acc_corr  = s.acc - accel_bias;
 
         pose.q *= deltaQuat(gyro_corr, dt);
         pose.q.normalize();
 
-        const Eigen::Vector3d acc_world = pose.q * s.acc;
+        const Eigen::Vector3d acc_world = pose.q * acc_corr;
         const Eigen::Vector3d acc_lin = acc_world - gravity;
+
+        if (acc_lin_count < 200) {
+            acc_lin_sum += acc_lin;
+            ++acc_lin_count;
+        }
 
         const Eigen::Vector3d v_prev = pose.v;
         pose.v += acc_lin * dt;
@@ -305,6 +359,7 @@ void integrateImuRaw(const std::vector<ImuSample>& imu, double t0, double t1, Po
 
         pose.t = s.t;
         trajectory_out.push_back(pose);
+
         ++idx;
     }
 }

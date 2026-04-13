@@ -1,4 +1,6 @@
 #include "io/tracked_output_writer.hpp"
+#include "core/tracked_frame.hpp"
+#include <vector>
 
 #include <fstream>
 #include <iomanip>

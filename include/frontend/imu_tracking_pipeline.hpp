@@ -3,6 +3,11 @@
 #include "imu/imu.hpp"
 #include "tracking/tracking_vis.hpp"
 #include "tracking/feature_refresh.hpp"
+#include "triangulation/camera_model.hpp"
+#include "triangulation/landmark.hpp"
+#include "triangulation/triangulator.hpp"
+#include "triangulation/extrinsics.hpp"
+
 
 #include <opencv2/opencv.hpp>
 #include <string>
@@ -35,6 +40,16 @@ public:
     const std::vector<vio::TrackedFrame>& sequence() const;
     const std::vector<Pose>& imuTrajectory() const;
 
+    void setCameraIntrinsics(const CameraIntrinsics& intrinsics);
+
+    void setTriangulationParams(const TriangulationParams& params);
+
+    const std::vector<vio::Landmark>& landmarks() const;
+
+    void setOutputLandmarksCsv(const std::string& path);
+
+    void setCameraExtrinsics(const RigidTransform& T_bs);
+
 private:
     bool loadInputs();
     bool runImu();
@@ -45,6 +60,8 @@ private:
         double timestamp,
         const std::vector<Track>& tracks
     );
+
+    bool runTriangulation();
 
 private:
     std::string imu_csv_path_;
@@ -68,4 +85,11 @@ private:
     std::vector<double> frame_timestamps_;
 
     std::vector<vio::TrackedFrame> sequence_;
+    CameraIntrinsics camera_intrinsics_;
+
+    TriangulationParams triangulation_params_;
+    std::vector<vio::Landmark> landmarks_;
+
+    std::string output_landmarks_csv_;
+    RigidTransform T_bs_;
 };
