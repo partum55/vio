@@ -70,3 +70,17 @@ void trackPointsPyramidalLK(
     const int maxIters = 10,
     const float eps = 1e-3f
 );
+
+void trackPointsPyramidalLKWithGuess(
+    const cv::Mat& imgPrevGray,
+    const cv::Mat& imgCurrGray,
+    const std::vector<cv::Point2f>& pts0,
+    const std::vector<cv::Point2f>& initialGuess,
+    std::vector<cv::Point2f>& pts1,
+    std::vector<uchar>& status,
+    std::vector<float>& err,
+    const int winSize = 9,
+    const int maxLevel = 3,
+    const int maxIters = 10,
+    const float eps = 1e-3f
+);

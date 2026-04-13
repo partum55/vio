@@ -1,41 +1,64 @@
-# Prerequisites
+# ---------- Dataset / outputs ----------
+data/
+*.csv
+*.mp4
+
+# ---------- CMake / build ----------
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+Makefile
+
+# ---------- IDE ----------
+.idea/
+.vscode/
+.PVS-Studio/
+
+# ---------- macOS ----------
+.DS_Store
+
+# ---------- Prerequisites ----------
 *.d
 
-# Compiled Object files
+# ---------- Compiled Object files ----------
 *.slo
 *.lo
 *.o
 *.obj
 
-# Precompiled Headers
+# ---------- Precompiled Headers ----------
 *.gch
 *.pch
 
-# Linker files
+# ---------- Linker files ----------
 *.ilk
 
-# Debugger Files
+# ---------- Debugger Files ----------
 *.pdb
 
-# Compiled Dynamic libraries
+# ---------- Compiled Dynamic libraries ----------
 *.so
 *.dylib
 *.dll
 
-# Fortran module files
+# ---------- Fortran module files ----------
 *.mod
 *.smod
 
-# Compiled Static libraries
+# ---------- Compiled Static libraries ----------
 *.lai
 *.la
 *.a
 *.lib
 
-# Executables
+# ---------- Executables ----------
 *.exe
 *.out
 *.app
 
-# debug information files
+# ---------- Debug information files ----------
 *.dwo

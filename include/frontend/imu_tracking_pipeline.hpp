@@ -50,6 +50,8 @@ public:
 
     void setCameraExtrinsics(const RigidTransform& T_bs);
 
+    bool runTrackingWithImuPrior();
+
 private:
     bool loadInputs();
     bool runImu();

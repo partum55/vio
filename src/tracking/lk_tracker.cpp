@@ -454,3 +454,58 @@ void trackPointsPyramidalLK(
         err[i] = trackErr;
     }
 }
+
+void trackPointsPyramidalLKWithGuess(
+    const cv::Mat& imgPrevGray,
+    const cv::Mat& imgCurrGray,
+    const std::vector<cv::Point2f>& pts0,
+    const std::vector<cv::Point2f>& initialGuess,
+    std::vector<cv::Point2f>& pts1,
+    std::vector<uchar>& status,
+    std::vector<float>& err,
+    const int winSize,
+    const int maxLevel,
+    const int maxIters,
+    const float eps
+) {
+    if (imgPrevGray.empty() || imgCurrGray.empty())
+        throw std::runtime_error("trackPointsPyramidalLKWithGuess: empty input image");
+    if (maxLevel < 0)
+        throw std::runtime_error("trackPointsPyramidalLKWithGuess: maxLevel must be >= 0");
+    if (pts0.size() != initialGuess.size())
+        throw std::runtime_error("trackPointsPyramidalLKWithGuess: pts0 and initialGuess size mismatch");
+
+    const std::vector<cv::Mat> pyrPrev = buildPyramid(imgPrevGray, maxLevel);
+    const std::vector<cv::Mat> pyrCurr = buildPyramid(imgCurrGray, maxLevel);
+
+    std::vector<cv::Mat> pyrIx(maxLevel + 1), pyrIy(maxLevel + 1);
+    for (int l = 0; l <= maxLevel; ++l) {
+        computeGradients(pyrCurr[l], pyrIx[l], pyrIy[l]);
+    }
+
+    pts1.resize(pts0.size());
+    status.assign(pts0.size(), 0);
+    err.assign(pts0.size(), -1.0f);
+
+    for (size_t i = 0; i < pts0.size(); ++i) {
+        cv::Point2f trackedPt = initialGuess[i];
+        float trackErr = -1.0f;
+
+        const bool ok = trackPointPyramidal(
+            pyrPrev,
+            pyrCurr,
+            pyrIx,
+            pyrIy,
+            pts0[i],
+            trackedPt,
+            winSize,
+            maxIters,
+            eps,
+            trackErr
+        );
+
+        pts1[i] = trackedPt;
+        status[i] = ok ? 1 : 0;
+        err[i] = trackErr;
+    }
+}
