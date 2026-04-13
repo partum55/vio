@@ -26,18 +26,17 @@ def build_grid_segments(extent: int = 10, step: int = 1, z: float = 0.0) -> list
 
 def try_import_runtime():
     try:
-        import cv2  # type: ignore
         import rerun as rr  # type: ignore
         import rerun.blueprint as rrb  # type: ignore
     except Exception as exc:  # pragma: no cover
         print(f"Receiver dependency error: {exc}", file=sys.stderr)
-        return None, None, None
-    return rr, cv2, rrb
+        return None, None
+    return rr, rrb
 
 
 def run_server(args: argparse.Namespace) -> int:
-    rr, cv2, rrb = try_import_runtime()
-    if rr is None or cv2 is None or rrb is None:
+    rr, rrb = try_import_runtime()
+    if rr is None or rrb is None:
         return 2
 
     blueprint = rrb.Blueprint(
@@ -83,7 +82,12 @@ def run_server(args: argparse.Namespace) -> int:
         ),
     )
 
-    trajectory: list[list[float]] = []
+    _TRAJ_STEP = 10       # subsample: log 1-in-N samples (200 Hz → 20 Hz)
+    _TRAJ_CHUNK = 200     # points per sealed chunk
+    sample_seq: int = 0
+    traj_buffer: list[list[float]] = []
+    traj_chunk_id: int = 0
+    last_image_path: Path | None = None
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -142,59 +146,50 @@ def run_server(args: argparse.Namespace) -> int:
                     elif hasattr(rr, "set_time_seconds"):
                         rr.set_time_seconds("sim_time", timestamp)
 
+                    sample_seq += 1
                     position = [float(v) for v in message["position"]]
                     quat = [float(v) for v in message["orientation_xyzw"]]
-                    trajectory.append(position)
 
-                    rr.log(
-                        "world/trajectory",
-                        rr.LineStrips3D([trajectory], colors=[[48, 220, 128]]),
-                    )
-                    rr.log(
-                        f"world/trajectory_points/{len(trajectory) - 1:06d}",
-                        rr.Points3D([position], colors=[[48, 220, 128]], radii=[0.03 * visual_scale]),
-                    )
-                    rr.log(
-                        "world/agent",
-                        rr.Points3D([position], colors=[[255, 220, 64]], radii=[0.08 * visual_scale]),
-                    )
+                    if sample_seq % _TRAJ_STEP == 0:
+                        traj_buffer.append(position)
+                        if len(traj_buffer) > _TRAJ_CHUNK:
+                            rr.log(
+                                f"world/trajectory/c{traj_chunk_id:06d}",
+                                rr.LineStrips3D([traj_buffer], colors=[[48, 220, 128]]),
+                            )
+                            traj_chunk_id += 1
+                            traj_buffer = [position]
+                        else:
+                            rr.log(
+                                "world/trajectory/live",
+                                rr.LineStrips3D([traj_buffer], colors=[[48, 220, 128]]),
+                            )
 
-                    heading_len = 0.35 * visual_scale
-                    direction_tip = [
-                        position[0] + heading_len * (2.0 * (quat[0] * quat[2] + quat[3] * quat[1])),
-                        position[1] + heading_len * (2.0 * (quat[1] * quat[2] - quat[3] * quat[0])),
-                        position[2] + heading_len * (1.0 - 2.0 * (quat[0] * quat[0] + quat[1] * quat[1])),
-                    ]
-                    rr.log(
-                        "world/agent_heading",
-                        rr.LineStrips3D([[position, direction_tip]], colors=[[255, 220, 64]]),
-                    )
+                        rr.log(
+                            "world/agent",
+                            rr.Points3D([position], colors=[[255, 220, 64]], radii=[0.08 * visual_scale]),
+                        )
 
-                    rr.log(
-                        "sensor/imu_acc",
-                        rr.LineStrips3D(
-                            [[[0.0, 0.0, 0.0], [float(v) for v in message["acc"]]]],
-                            colors=[[255, 96, 96]],
-                        ),
-                    )
-                    rr.log(
-                        "sensor/imu_gyro",
-                        rr.LineStrips3D(
-                            [[[0.0, 0.0, 0.0], [float(v) for v in message["gyro"]]]],
-                            colors=[[96, 96, 255]],
-                        ),
-                    )
+                        heading_len = 0.35 * visual_scale
+                        direction_tip = [
+                            position[0] + heading_len * (2.0 * (quat[0] * quat[2] + quat[3] * quat[1])),
+                            position[1] + heading_len * (2.0 * (quat[1] * quat[2] - quat[3] * quat[0])),
+                            position[2] + heading_len * (1.0 - 2.0 * (quat[0] * quat[0] + quat[1] * quat[1])),
+                        ]
+                        rr.log(
+                            "world/agent_heading",
+                            rr.LineStrips3D([[position, direction_tip]], colors=[[255, 220, 64]]),
+                        )
+
                     rr.log(
                         "stats/tracks",
                         rr.TextDocument(f"Tracked features: {int(message.get('track_count', 0))}"),
                     )
 
                     image_path = Path(message.get("image_path", ""))
-                    if image_path.is_file():
-                        image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
-                        if image is not None:
-                            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                            rr.log("camera/first_view", rr.Image(image))
+                    if image_path != last_image_path and image_path.is_file():
+                        rr.log("camera/first_view", rr.EncodedImage(contents=image_path.read_bytes(), media_type="image/jpeg"))
+                        last_image_path = image_path
                     continue
 
                 if msg_type == "done":

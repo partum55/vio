@@ -796,11 +796,11 @@ RunResult runViconLiveDemo(const std::filesystem::path& dataset_root,
             replay_config.first_view_height * 0.5,
             replay_config.visual_scale,
             ground_z);
-        stream_client->sendPointCloud(environment, environment.size());
     }
 
     double previous_timestamp_s = samples.front().timestamp_s;
     double last_render_timestamp_s = -std::numeric_limits<double>::infinity();
+    std::size_t render_count = 0;
     for (std::size_t i = 0; i < samples.size(); ++i) {
         const ViconReplaySample& sample_data = samples[i];
         if (i != 0) {
@@ -828,11 +828,12 @@ RunResult runViconLiveDemo(const std::filesystem::path& dataset_root,
                     replay_config.first_view_height,
                     replay_config.first_view_fx,
                     replay_config.first_view_fy);
-                latest_frame_path = live_frame_dir / ("frame_" + std::to_string(i) + ".jpg");
+                latest_frame_path = live_frame_dir / ("frame_" + std::to_string(render_count % 2) + ".jpg");
                 cv::imwrite(
                     latest_frame_path.string(),
                     frame,
                     std::vector<int>{cv::IMWRITE_JPEG_QUALITY, 85});
+                ++render_count;
                 last_render_timestamp_s = sample_data.timestamp_s;
             }
 
