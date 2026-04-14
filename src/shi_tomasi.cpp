@@ -16,6 +16,23 @@ CustomShiTomasiDetector::CustomShiTomasiDetector(
 {
 }
 
+// int CustomShiTomasiDetector::effectiveTaskCount(const cv::Size& size) const
+// {
+//     const int pixels = size.width * size.height;
+
+//     if (pixels < 512 * 512)
+//     {
+//         return 1;
+//     }
+
+//     if (pixels < 1024 * 1024)
+//     {
+//         return std::min(num_tasks_, 4);
+//     }
+
+//     return std::max(1, num_tasks_);
+// }
+
 int CustomShiTomasiDetector::effectiveTaskCount(const cv::Size& size) const
 {
     const int pixels = size.width * size.height;
@@ -27,10 +44,10 @@ int CustomShiTomasiDetector::effectiveTaskCount(const cv::Size& size) const
 
     if (pixels < 1024 * 1024)
     {
-        return std::min(num_tasks_, 4);
+        return std::min(num_tasks_, 2);
     }
 
-    return std::max(1, num_tasks_);
+    return std::max(1, std::min(num_tasks_, 8));
 }
 
 cv::Mat CustomShiTomasiDetector::shiTomasiScoreImage(
@@ -46,7 +63,7 @@ cv::Mat CustomShiTomasiDetector::shiTomasiScoreImage(
     const int blurPasses = std::max(1, static_cast<int>(std::round(p.gaussianSigma)));
     for (int i = 0; i < blurPasses; ++i)
     {
-        gaussianBlurCustom(blur_, blur_tmp_, pool_, effective_tasks);
+        gaussianBlurCustomBanded(blur_, blur_tmp_, pool_, effective_tasks, 64);
         std::swap(blur_, blur_tmp_);
     }
 
@@ -82,13 +99,13 @@ cv::Mat CustomShiTomasiDetector::shiTomasiScoreImage(
     const int tensorPasses = std::max(1, p.blockSize / 2);
     for (int i = 0; i < tensorPasses; ++i)
     {
-        gaussianBlurCustom(Ixx_, tensor_tmp_, pool_, effective_tasks);
+        gaussianBlurCustomBanded(blur_, blur_tmp_, pool_, effective_tasks, 64);
         std::swap(Ixx_, tensor_tmp_);
 
-        gaussianBlurCustom(Iyy_, tensor_tmp_, pool_, effective_tasks);
+        gaussianBlurCustomBanded(Iyy_, tensor_tmp_, pool_, effective_tasks, 64 );
         std::swap(Iyy_, tensor_tmp_);
 
-        gaussianBlurCustom(Ixy_, tensor_tmp_, pool_, effective_tasks);
+        gaussianBlurCustomBanded(Ixy_, tensor_tmp_, pool_, effective_tasks, 64);
         std::swap(Ixy_, tensor_tmp_);
     }
 

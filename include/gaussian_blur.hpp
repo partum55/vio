@@ -28,3 +28,16 @@ cv::Mat gaussianBlurCustom(
     const cv::Mat& image,
     ABCThreadPool& pool,
     int num_tasks);
+
+void gaussianBlurCustomBanded(
+    const cv::Mat& image,
+    cv::Mat& result,
+    ABCThreadPool& pool,
+    int num_threads,
+    int rows_per_chunk = 64);
+
+cv::Mat gaussianBlurCustomBanded(
+    const cv::Mat& image,
+    ABCThreadPool& pool,
+    int num_threads,
+    int rows_per_chunk = 64);
