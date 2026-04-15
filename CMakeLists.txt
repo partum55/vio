@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED NO_MODULE)
+find_package(Threads REQUIRED)
 
 set(SOURCES
         src/imu/imu.cpp
@@ -24,6 +25,10 @@ set(SOURCES
         src/triangulation/triangulator.cpp
 
         src/core/projection.cpp
+
+        src/keypoint_extraction/gaussian_blur.cpp
+        src/keypoint_extraction/shi_tomasi.cpp
+        src/keypoint_extraction/sobel.cpp
 )
 
 add_executable(imu_tracking_app
@@ -41,4 +46,5 @@ target_link_libraries(imu_tracking_app
         PRIVATE
         ${OpenCV_LIBS}
         Eigen3::Eigen
+        Threads::Threads
 )
