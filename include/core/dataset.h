@@ -1,6 +1,6 @@
 #pragma once
 
-#include "imu/imu.h"
+#include "imu/imu.hpp"
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>

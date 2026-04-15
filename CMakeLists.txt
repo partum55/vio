@@ -18,7 +18,7 @@ add_executable(vio
     src/keypoints/gaussian_blur.cpp
     src/keypoints/sobel.cpp
     src/keypoints/shi_tomasi.cpp
-    src/tracking/klt_tracker.cpp
+    src/tracking/lk_tracker.cpp
 )
 
 target_include_directories(vio PRIVATE
@@ -27,6 +27,32 @@ target_include_directories(vio PRIVATE
 )
 
 target_link_libraries(vio PRIVATE
+    Eigen3::Eigen
+    ${OpenCV_LIBS}
+    Threads::Threads
+)
+
+add_executable(imu_tracking_app
+    apps/imu_tracking_app.cpp
+    src/frontend/imu_tracking_pipeline.cpp
+    src/frontend/frame_pose_sync.cpp
+    src/io/image_sequence_reader.cpp
+    src/io/tracked_output_writer.cpp
+    src/imu/imu.cpp
+    src/tracking/lk_tracker.cpp
+    src/tracking/tracking_vis.cpp
+    src/tracking/feature_refresh.cpp
+    src/keypoints/shi_tomasi.cpp
+    src/keypoints/gaussian_blur.cpp
+    src/keypoints/sobel.cpp
+)
+
+target_include_directories(imu_tracking_app PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${OpenCV_INCLUDE_DIRS}
+)
+
+target_link_libraries(imu_tracking_app PRIVATE
     Eigen3::Eigen
     ${OpenCV_LIBS}
     Threads::Threads

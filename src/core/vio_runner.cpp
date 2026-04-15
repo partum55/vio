@@ -1,10 +1,10 @@
 #include "core/vio_runner.h"
 
 #include "core/data_generator.h"
-#include "imu/imu.h"
+#include "imu/imu.hpp"
 #include "keypoints/shi_tomasi.hpp"
 #include "keypoints/tpool_default.hpp"
-#include "tracking/klt_tracker.h"
+#include "tracking/lk_tracker.hpp"
 
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -542,7 +542,7 @@ RunResult runVisualInertialOdometry(const Dataset& dataset,
             std::vector<cv::Point2f> tracked_points;
             std::vector<uchar> status;
             std::vector<float> err;
-            trackPoints(prev_gray, gray, prev_points, tracked_points, status, err, 9, 3, 12, 1e-3f);
+            trackPointsPyramidalLK(prev_gray, gray, prev_points, tracked_points, status, err, 9, 3, 12, 1e-3f);
 
             std::vector<cv::Point2f> filtered_prev;
             std::vector<cv::Point2f> filtered_curr;
