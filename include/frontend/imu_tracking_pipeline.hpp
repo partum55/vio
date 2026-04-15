@@ -65,7 +65,6 @@ private:
 
     bool runTriangulation();
 
-private:
     std::string imu_csv_path_;
     std::string images_dir_;
     std::string frame_timestamps_path_;

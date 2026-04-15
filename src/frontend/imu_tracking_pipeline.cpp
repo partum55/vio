@@ -11,6 +11,8 @@
 #include "io/landmark_output_writer.hpp"
 #include "triangulation/extrinsics.hpp"
 #include "core/projection.hpp"
+#include "keypoint_extraction/shi_tomasi.hpp"
+#include "keypoint_extraction/tpool_default.hpp"
 
 #include <unordered_map>
 
@@ -208,7 +210,34 @@ bool ImuTrackingPipeline::runImu()
 
 void ImuTrackingPipeline::initializeTracks(const cv::Mat& first_gray)
 {
-    (void)first_gray;
+    if (first_gray.empty()) {
+        throw std::runtime_error("initializeTracks: empty image");
+    }
+
+    if (first_gray.type() != CV_8UC1) {
+        throw std::runtime_error("initializeTracks: expected CV_8UC1 grayscale image");
+    }
+
+    const unsigned int numThreads =
+        std::max(1u, std::thread::hardware_concurrency());
+
+    ThreadPool pool(static_cast<int>(numThreads));
+    CustomShiTomasiDetector detector(pool, static_cast<int>(numThreads));
+
+    ShiTomasiParams detectorParams;
+    detectorParams.maxCorners = 100;
+    detectorParams.qualityLevel = 0.01;
+    detectorParams.minDistance = 10.0;
+    detectorParams.blockSize = 5;
+    detectorParams.gaussianSigma = 1.0;
+    detectorParams.nmsRadius = 2;
+
+    std::vector<cv::Point2f> initial_pts =
+        detector.detect(first_gray, detectorParams);
+
+    if (initial_pts.empty()) {
+        throw std::runtime_error("initializeTracks: no initial features found");
+    }
 }
 
 void ImuTrackingPipeline::setTriangulationParams(const TriangulationParams& params)

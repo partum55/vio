@@ -1,8 +1,12 @@
 #include "tracking/feature_refresh.hpp"
 
+#include "keypoint_extraction/shi_tomasi.hpp"
+#include "keypoint_extraction/tpool_default.hpp"
+
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
+#include <thread>
 
 cv::Mat makeAllowedMask(
     const cv::Size& size,
@@ -49,15 +53,22 @@ void refreshTracksIfNeeded(
         params.suppressionRadius
     );
 
-    std::vector<cv::Point2f> detected;
-    cv::goodFeaturesToTrack(
-        gray,
-        detected,
-        missing,
-        params.qualityLevel,
-        params.minDistance,
-        mask
-    );
+    const unsigned int numThreads =
+        std::max(1u, std::thread::hardware_concurrency());
+
+    ThreadPool pool(numThreads);
+    CustomShiTomasiDetector detector(pool, static_cast<int>(numThreads));
+
+    ShiTomasiParams detectorParams;
+    detectorParams.maxCorners = missing;
+    detectorParams.qualityLevel = params.qualityLevel;
+    detectorParams.minDistance = params.minDistance;
+    detectorParams.blockSize = 5;
+    detectorParams.gaussianSigma = 1.0;
+    detectorParams.nmsRadius = 2;
+
+    std::vector<cv::Point2f> detected =
+        detector.detect(gray, detectorParams, mask);
 
     for (const auto& p : detected) {
         Track t;
