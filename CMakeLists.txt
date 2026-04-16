@@ -1,50 +1,33 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.16)
 project(vio_project)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(OpenCV REQUIRED)
-find_package(Eigen3 REQUIRED NO_MODULE)
+find_package(Eigen3 3.3 REQUIRED NO_MODULE)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs videoio)
 find_package(Threads REQUIRED)
 
-set(SOURCES
-        src/imu/imu.cpp
-
-        src/tracking/lk_tracker.cpp
-        src/tracking/tracking_vis.cpp
-        src/tracking/feature_refresh.cpp
-
-        src/frontend/frame_pose_sync.cpp
-        src/frontend/imu_tracking_pipeline.cpp
-
-        src/io/image_sequence_reader.cpp
-        src/io/tracked_output_writer.cpp
-        src/io/landmark_output_writer.cpp
-
-        src/triangulation/triangulator.cpp
-
-        src/core/projection.cpp
-
-        src/keypoint_extraction/gaussian_blur.cpp
-        src/keypoint_extraction/shi_tomasi.cpp
-        src/keypoint_extraction/sobel.cpp
+add_executable(vio
+    main.cpp
+    src/core/data_generator.cpp
+    src/core/dataset.cpp
+    src/core/rerun_stream.cpp
+    src/core/vio_runner.cpp
+    src/imu/imu.cpp
+    src/keypoints/gaussian_blur.cpp
+    src/keypoints/sobel.cpp
+    src/keypoints/shi_tomasi.cpp
+    src/tracking/klt_tracker.cpp
 )
 
-add_executable(imu_tracking_app
-        apps/imu_tracking_app.cpp
-        ${SOURCES}
+target_include_directories(vio PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${OpenCV_INCLUDE_DIRS}
 )
 
-target_include_directories(imu_tracking_app
-        PRIVATE
-        include
-        ${OpenCV_INCLUDE_DIRS}
-)
-
-target_link_libraries(imu_tracking_app
-        PRIVATE
-        ${OpenCV_LIBS}
-        Eigen3::Eigen
-        Threads::Threads
+target_link_libraries(vio PRIVATE
+    Eigen3::Eigen
+    ${OpenCV_LIBS}
+    Threads::Threads
 )
