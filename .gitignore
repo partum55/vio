@@ -68,3 +68,4 @@ htmlcov/
 Thumbs.db
 
 dataset/*
+data/*
