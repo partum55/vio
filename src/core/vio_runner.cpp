@@ -1,6 +1,7 @@
 #include "core/vio_runner.h"
 
 #include "core/data_generator.h"
+#include "core/dataset_streamer.h"
 #include "imu/imu.h"
 #include "keypoints/shi_tomasi.hpp"
 #include "keypoints/tpool_default.hpp"
@@ -15,6 +16,7 @@
 #include <fstream>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
@@ -390,6 +392,31 @@ std::vector<ImuSample> collectImuSlice(const std::vector<ImuSample>& imu,
     return slice;
 }
 
+// Drains IMU samples with t <= t1 from the queue-based path.
+// Stashes any over-read sample in `lookahead` for the next call.
+std::vector<ImuSample> drainImuQueue(ThreadSafeQueue<ImuSample>& q,
+                                     std::optional<ImuSample>& lookahead,
+                                     double t1) {
+    std::vector<ImuSample> slice;
+
+    if (lookahead) {
+        if (lookahead->t <= t1) {
+            slice.push_back(std::move(*lookahead));
+            lookahead.reset();
+        } else {
+            return slice;
+        }
+    }
+
+    while (true) {
+        auto s = q.try_deque();
+        if (!s) break;
+        if (s->t > t1) { lookahead = std::move(s); break; }
+        slice.push_back(std::move(*s));
+    }
+    return slice;
+}
+
 CameraPose makePose(double timestamp_s,
                     const Eigen::Vector3d& position,
                     const Eigen::Quaterniond& orientation) {
@@ -654,6 +681,187 @@ RunResult runVisualInertialOdometry(const Dataset& dataset,
         }
 
         prev_gray = gray;
+        prev_points = curr_points.empty() ? detector.detect(gray, detector_params) : curr_points;
+    }
+
+    if (stream_client && stream_client->isConnected()) {
+        stream_client->sendDone(result.processed_frames);
+    }
+
+    return result;
+}
+
+RunResult runVisualInertialOdometry(DatasetStreamer& streamer,
+                                    const Dataset& dataset,
+                                    const RunConfig& config,
+                                    RerunStreamClient* stream_client) {
+    RunResult result;
+    result.video_path = config.write_video ? config.video_output : std::filesystem::path{};
+
+    cv::VideoWriter writer;
+    if (config.write_video) {
+        writer.open(
+            config.video_output.string(),
+            cv::VideoWriter::fourcc('m', 'p', '4', 'v'),
+            20.0,
+            cv::Size(dataset.camera.width, dataset.camera.height));
+        if (!writer.isOpened()) {
+            throw std::runtime_error("failed to open video writer for " + config.video_output.string());
+        }
+    }
+
+    const unsigned hw_threads = std::max(1u, std::thread::hardware_concurrency());
+    ThreadPool pool(static_cast<int>(hw_threads));
+    CustomShiTomasiDetector detector(pool, static_cast<int>(hw_threads));
+
+    ShiTomasiParams detector_params;
+    detector_params.maxCorners    = 600;
+    detector_params.minDistance   = 12.0;
+    detector_params.qualityLevel  = 0.02;
+    detector_params.blockSize     = 5;
+    detector_params.gaussianSigma = 1.0;
+    detector_params.nmsRadius     = 2;
+
+    const Eigen::Vector3d gravity(0.0, 0.0, 9.81);
+
+    cv::Mat prev_gray;
+    std::vector<cv::Point2f> prev_points;
+
+    Eigen::Vector3d fused_position = Eigen::Vector3d::Zero();
+    ImuPose imu_pose;
+    ImuPose prev_imu_pose = imu_pose;
+    bool have_previous_frame = false;
+    std::optional<ImuSample> imu_lookahead;
+
+    if (stream_client && stream_client->isConnected()) {
+        stream_client->sendInit(dataset);
+    }
+
+    streamer.start();
+
+    while (auto cf = streamer.imgQueue().deque()) {
+        cv::Mat image = cf->image;
+        if (image.cols != dataset.camera.width || image.rows != dataset.camera.height) {
+            cv::resize(image, image, cv::Size(dataset.camera.width, dataset.camera.height));
+        }
+
+        if (config.write_video) {
+            writer.write(image);
+        }
+
+        const cv::Mat gray = toGrayU8(image);
+        std::vector<cv::Point2f> curr_points;
+        std::size_t valid_tracks = 0;
+        Eigen::Vector3d gyro = Eigen::Vector3d::Zero();
+        Eigen::Vector3d acc  = Eigen::Vector3d::Zero();
+
+        if (!have_previous_frame) {
+            prev_imu_pose.t = cf->timestamp_s;
+            imu_pose.t      = cf->timestamp_s;
+            prev_points     = detector.detect(gray, detector_params);
+        } else {
+            std::vector<cv::Point2f> tracked_points;
+            std::vector<uchar> status;
+            std::vector<float> err;
+            trackPoints(prev_gray, gray, prev_points, tracked_points, status, err, 9, 3, 12, 1e-3f);
+
+            std::vector<cv::Point2f> filtered_prev;
+            std::vector<cv::Point2f> filtered_curr;
+            filtered_prev.reserve(tracked_points.size());
+            filtered_curr.reserve(tracked_points.size());
+
+            std::vector<double> dx_values;
+            std::vector<double> dy_values;
+            std::vector<double> flow_values;
+
+            for (std::size_t i = 0; i < tracked_points.size(); ++i) {
+                if (!status[i]) continue;
+                const cv::Point2f& p0 = prev_points[i];
+                const cv::Point2f& p1 = tracked_points[i];
+                if (p1.x < 0.0f || p1.y < 0.0f ||
+                    p1.x >= static_cast<float>(gray.cols) ||
+                    p1.y >= static_cast<float>(gray.rows))
+                    continue;
+                filtered_prev.push_back(p0);
+                filtered_curr.push_back(p1);
+                dx_values.push_back(static_cast<double>(p1.x - p0.x));
+                dy_values.push_back(static_cast<double>(p1.y - p0.y));
+                flow_values.push_back(std::hypot(dx_values.back(), dy_values.back()));
+            }
+
+            valid_tracks = filtered_curr.size();
+            curr_points  = filtered_curr;
+
+            const std::vector<ImuSample> imu_slice =
+                drainImuQueue(streamer.imuQueue(), imu_lookahead, cf->timestamp_s);
+
+            if (!imu_slice.empty()) {
+                for (const ImuSample& s : imu_slice) {
+                    gyro += s.gyro;
+                    acc  += s.acc;
+                }
+                gyro /= static_cast<double>(imu_slice.size());
+                acc  /= static_cast<double>(imu_slice.size());
+
+                std::vector<ImuPose> interval_traj;
+                integrateImuFiltered(
+                    imu_slice, prev_imu_pose.t, cf->timestamp_s,
+                    imu_pose, gravity, interval_traj);
+            } else {
+                imu_pose.t = cf->timestamp_s;
+            }
+
+            const Eigen::Vector3d inertial_step = imu_pose.p - prev_imu_pose.p;
+            const double dt = std::max(1e-3, cf->timestamp_s - prev_imu_pose.t);
+
+            const double median_dx   = median(dx_values);
+            const double median_dy   = median(dy_values);
+            const double median_flow = median(flow_values);
+
+            Eigen::Vector3d visual_step_camera(
+                -median_dx / std::max(1.0, dataset.camera.fx),
+                -median_dy / std::max(1.0, dataset.camera.fy),
+                0.02 + 0.35 * median_flow /
+                    std::max(1.0, 0.5 * (dataset.camera.fx + dataset.camera.fy)));
+            visual_step_camera.x() *= 0.25;
+            visual_step_camera.y() *= 0.25;
+
+            Eigen::Vector3d visual_step_world = imu_pose.q * visual_step_camera;
+            Eigen::Vector3d fused_step = 0.8 * inertial_step + 0.2 * visual_step_world;
+            clampMagnitude(fused_step, 3.0 * dt + 0.03);
+
+            fused_position += fused_step;
+            prev_imu_pose = imu_pose;
+
+            if (valid_tracks < 80) {
+                curr_points = detector.detect(gray, detector_params);
+            }
+        }
+
+        if (!have_previous_frame) {
+            curr_points          = prev_points;
+            have_previous_frame  = true;
+        }
+
+        const Eigen::Quaterniond orientation = imu_pose.q.normalized();
+        result.trajectory.push_back(makePose(cf->timestamp_s, fused_position, orientation));
+        ++result.processed_frames;
+
+        if (stream_client && stream_client->isConnected()) {
+            StreamSample sample;
+            sample.timestamp_s  = cf->timestamp_s;
+            sample.position     = fused_position;
+            sample.orientation  = orientation;
+            sample.gyro         = gyro;
+            sample.acc          = acc;
+            sample.image_path   = std::filesystem::absolute(cf->image_path);
+            sample.track_count  = valid_tracks;
+            if (stream_client->sendSample(sample)) {
+                ++result.streamed_frames;
+            }
+        }
+
+        prev_gray   = gray;
         prev_points = curr_points.empty() ? detector.detect(gray, detector_params) : curr_points;
     }
 

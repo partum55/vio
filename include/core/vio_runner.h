@@ -10,6 +10,8 @@
 
 namespace vio {
 
+class DatasetStreamer;
+
 struct RunConfig {
     std::string host = "127.0.0.1";
     int port = 9877;
@@ -36,6 +38,13 @@ struct ViconReplayConfig {
 };
 
 RunResult runVisualInertialOdometry(const Dataset& dataset,
+                                    const RunConfig& config,
+                                    RerunStreamClient* stream_client);
+
+// Queue-based overload: streamer supplies pre-loaded frames and IMU samples.
+// Calls streamer.start() internally; caller must not start it beforehand.
+RunResult runVisualInertialOdometry(DatasetStreamer& streamer,
+                                    const Dataset& dataset,
                                     const RunConfig& config,
                                     RerunStreamClient* stream_client);
 
