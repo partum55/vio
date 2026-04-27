@@ -20,7 +20,6 @@ add_executable(vio
     src/keypoints/gaussian_blur.cpp
     src/keypoints/sobel.cpp
     src/keypoints/shi_tomasi.cpp
-    src/tracking/klt_tracker.cpp
 )
 
 target_include_directories(vio PRIVATE

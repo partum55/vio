@@ -100,10 +100,23 @@ void ImuTrackingPipeline::setTrackingParams(
     float eps
 )
 {
-    win_size_ = win_size;
-    max_level_ = max_level;
-    max_iters_ = max_iters;
-    eps_ = eps;
+    VisualFrontendParams params;
+
+    params.tracker.winSize = win_size;
+    params.tracker.maxLevel = max_level;
+    params.tracker.maxIters = max_iters;
+    params.tracker.eps = eps;
+
+    params.initialFeatures = 100;
+    params.minTrackedFeatures = 50;
+
+    params.refresh.minTrackedFeatures = 50;
+    params.refresh.targetFeatures = 100;
+    params.refresh.suppressionRadius = 10.0f;
+    params.refresh.qualityLevel = 0.01;
+    params.refresh.minDistance = 10.0;
+
+    frontend_.setParams(params);
 }
 
 void ImuTrackingPipeline::setRefreshParams(const FeatureRefreshParams& params)
@@ -313,14 +326,12 @@ bool ImuTrackingPipeline::runTriangulation()
 
 bool ImuTrackingPipeline::runTrackingAndSync()
 {
-    if (image_paths_.empty() || frame_timestamps_.empty())
-    {
+    if (image_paths_.empty() || frame_timestamps_.empty()) {
         std::cerr << "Images or timestamps are empty\n";
         return false;
     }
 
-    if (imu_trajectory_.empty())
-    {
+    if (imu_trajectory_.empty()) {
         std::cerr << "IMU trajectory is empty\n";
         return false;
     }
@@ -330,181 +341,94 @@ bool ImuTrackingPipeline::runTrackingAndSync()
 
     size_t start_idx = 0;
     while (start_idx < frame_timestamps_.size() &&
-        frame_timestamps_[start_idx] < t_min)
-    {
+           frame_timestamps_[start_idx] < t_min) {
         ++start_idx;
     }
 
     size_t end_idx = frame_timestamps_.size();
     while (end_idx > start_idx &&
-        frame_timestamps_[end_idx - 1] > t_max)
-    {
+           frame_timestamps_[end_idx - 1] > t_max) {
         --end_idx;
     }
 
-    if (start_idx >= end_idx)
-    {
-        std::cerr << "No overlapping time range between frames and IMU\n";
+    if (start_idx >= end_idx) {
+        std::cerr << "No overlapping time range\n";
         return false;
-    }
-    const size_t max_frames = 220; // 0 без обмеження
-
-    if (max_frames > 0) {
-        end_idx = std::min(end_idx, start_idx + max_frames);
     }
 
     cv::Mat first_frame = cv::imread(image_paths_[start_idx], cv::IMREAD_COLOR);
-
-    if (first_frame.empty())
-    {
-        std::cerr << "Failed to read first image: " << image_paths_[start_idx] << "\n";
+    if (first_frame.empty()) {
+        std::cerr << "Failed to read first frame\n";
         return false;
     }
-
-    const int width = first_frame.cols;
-    const int height = first_frame.rows;
 
     cv::VideoWriter writer(
         output_video_path_,
-        cv::VideoWriter::fourcc('m', 'p', '4', 'v'),
+        cv::VideoWriter::fourcc('m','p','4','v'),
         20.0,
-        cv::Size(width, height)
+        cv::Size(first_frame.cols, first_frame.rows)
     );
-
-    if (!writer.isOpened())
-    {
-        std::cerr << "Failed to open output video: " << output_video_path_ << "\n";
-        return false;
-    }
-
-    cv::Mat prev_gray, prev_gray_f, prev_blur;
-
-    cv::cvtColor(first_frame, prev_gray, cv::COLOR_BGR2GRAY);
-    prev_gray.convertTo(prev_gray_f, CV_32F, 1.0 / 255.0);
-    prev_blur = gaussianBlurCustomFloat(prev_gray_f);
-
-    std::vector<cv::Point2f> initial_pts;
-    cv::goodFeaturesToTrack(prev_gray, initial_pts, 100, 0.01, 10.0);
-
-    if (initial_pts.empty())
-    {
-        std::cerr << "No initial features found in first frame\n";
-        return false;
-    }
-
-    std::vector<Track> tracks;
-    int next_track_id = 0;
-
-    for (const auto& p : initial_pts)
-    {
-        Track t;
-        t.id = next_track_id++;
-        t.pt = p;
-        t.history.push_back(p);
-        tracks.push_back(t);
-    }
-
-    FeatureRefreshParams refresh_params;
-    refresh_params.minTrackedFeatures = 50;
-    refresh_params.targetFeatures = 100;
-    refresh_params.suppressionRadius = 10.0f;
-    refresh_params.qualityLevel = 0.01;
-    refresh_params.minDistance = 10.0;
 
     sequence_.clear();
 
-    appendFrame(
+    // === INIT PIVOT ===
+    vio::FrameState first_state = buildFrameStateFromImu(
         static_cast<int>(start_idx),
         frame_timestamps_[start_idx],
-        tracks
+        imu_trajectory_
     );
 
-    writer.write(drawTrackingVisualization(first_frame, tracks));
+    frontend_.setPivot(
+        static_cast<int>(start_idx),
+        frame_timestamps_[start_idx],
+        first_frame,
+        first_state
+    );
 
-    for (size_t img_idx = start_idx + 1; img_idx < end_idx; ++img_idx)
-    {
-        cv::Mat curr_frame = cv::imread(image_paths_[img_idx], cv::IMREAD_COLOR);
-        if (curr_frame.empty())
-        {
-            std::cerr << "Failed to read image: " << image_paths_[img_idx] << "\n";
-            continue;
-        }
+    auto first_output = frontend_.track(
+        static_cast<int>(start_idx),
+        frame_timestamps_[start_idx],
+        first_frame,
+        first_state
+    );
 
-        cv::Mat curr_gray, curr_gray_f, curr_blur;
+    sequence_.push_back(first_output.frame);
+    writer.write(drawTrackingVisualization(first_frame, first_output.tracks));
 
-        cv::cvtColor(curr_frame, curr_gray, cv::COLOR_BGR2GRAY);
-        curr_gray.convertTo(curr_gray_f, CV_32F, 1.0 / 255.0);
-        curr_blur = gaussianBlurCustomFloat(curr_gray_f);
+    // === MAIN LOOP ===
+    for (size_t i = start_idx + 1; i < end_idx; ++i) {
 
-        std::vector<cv::Point2f> pts_prev;
-        pts_prev.reserve(tracks.size());
-        for (const auto& t : tracks)
-        {
-            pts_prev.push_back(t.pt);
-        }
+        cv::Mat frame = cv::imread(image_paths_[i], cv::IMREAD_COLOR);
+        if (frame.empty()) continue;
 
-        std::vector<cv::Point2f> pts_curr;
-        std::vector<uchar> status;
-        std::vector<float> err;
-
-        try
-        {
-            trackPointsPyramidalLK(
-                prev_blur,
-                curr_blur,
-                pts_prev,
-                pts_curr,
-                status,
-                err,
-                win_size_,
-                max_level_,
-                max_iters_,
-                eps_
-            );
-        }
-        catch (const std::exception& e)
-        {
-            std::cerr << "Tracking failed on frame " << img_idx << ": " << e.what() << "\n";
-            return false;
-        }
-
-        std::vector<Track> new_tracks;
-        new_tracks.reserve(tracks.size());
-
-        for (size_t i = 0; i < tracks.size(); ++i)
-        {
-            if (status[i])
-            {
-                Track updated = tracks[i];
-                updated.pt = pts_curr[i];
-                updated.history.push_back(pts_curr[i]);
-                new_tracks.push_back(updated);
-            }
-        }
-
-        tracks = std::move(new_tracks);
-
-        refreshTracksIfNeeded(curr_gray, tracks, next_track_id, refresh_params);
-
-        appendFrame(
-            static_cast<int>(img_idx),
-            frame_timestamps_[img_idx],
-            tracks
+        vio::FrameState state = buildFrameStateFromImu(
+            static_cast<int>(i),
+            frame_timestamps_[i],
+            imu_trajectory_
         );
 
-        writer.write(drawTrackingVisualization(curr_frame, tracks, 15));
+        auto output = frontend_.track(
+            static_cast<int>(i),
+            frame_timestamps_[i],
+            frame,
+            state
+        );
 
-        prev_blur = curr_blur.clone();
+        sequence_.push_back(output.frame);
+        writer.write(drawTrackingVisualization(frame, output.tracks, 15));
 
-        if (tracks.empty())
-        {
-            std::cerr << "No tracks left on frame " << img_idx << "\n";
-            break;
+        // === RESET PIVOT ===
+        if (!output.enough_tracks) {
+            frontend_.setPivot(
+                static_cast<int>(i),
+                frame_timestamps_[i],
+                frame,
+                state
+            );
         }
     }
 
     writer.release();
-
     return true;
 }
 
@@ -557,8 +481,7 @@ bool ImuTrackingPipeline::runTrackingWithImuPrior()
         return false;
     }
 
-    const size_t max_frames = 220; // 0 без обмеження
-
+    const size_t max_frames = 220;
     if (max_frames > 0) {
         end_idx = std::min(end_idx, start_idx + max_frames);
     }
@@ -569,14 +492,11 @@ bool ImuTrackingPipeline::runTrackingWithImuPrior()
         return false;
     }
 
-    const int width = first_frame.cols;
-    const int height = first_frame.rows;
-
     cv::VideoWriter writer(
         "imu_prior_" + output_video_path_,
         cv::VideoWriter::fourcc('m', 'p', '4', 'v'),
         20.0,
-        cv::Size(width, height)
+        cv::Size(first_frame.cols, first_frame.rows)
     );
 
     if (!writer.isOpened()) {
@@ -584,42 +504,43 @@ bool ImuTrackingPipeline::runTrackingWithImuPrior()
         return false;
     }
 
-    cv::Mat prev_gray, prev_gray_f, prev_blur;
-
-    cv::cvtColor(first_frame, prev_gray, cv::COLOR_BGR2GRAY);
-    prev_gray.convertTo(prev_gray_f, CV_32F, 1.0 / 255.0);
-    prev_blur = gaussianBlurCustomFloat(prev_gray_f);
-
     std::vector<Track> tracks = buildTracksFromFirstFrameSequence(sequence_);
     if (tracks.empty()) {
         std::cerr << "Failed to initialize IMU-prior tracks from sequence\n";
         return false;
     }
 
-    int next_track_id = 0;
-    for (const auto& t : tracks) {
-        next_track_id = std::max(next_track_id, t.id + 1);
-    }
-
-    FeatureRefreshParams refresh_params;
-    refresh_params.minTrackedFeatures = 50;
-    refresh_params.targetFeatures = 100;
-    refresh_params.suppressionRadius = 10.0f;
-    refresh_params.qualityLevel = 0.01;
-    refresh_params.minDistance = 10.0;
-
-    std::vector<vio::TrackedFrame> imu_prior_sequence;
-    imu_prior_sequence.clear();
-
-    appendFrame(
+    vio::FrameState first_state = buildFrameStateFromImu(
         static_cast<int>(start_idx),
         frame_timestamps_[start_idx],
+        imu_trajectory_
+    );
+
+    frontend_.setPivotWithTracks(
+        static_cast<int>(start_idx),
+        frame_timestamps_[start_idx],
+        first_frame,
+        first_state,
         tracks
     );
-    imu_prior_sequence.push_back(sequence_.back());
-    sequence_.pop_back();
 
-    writer.write(drawTrackingVisualization(first_frame, tracks));
+    std::vector<vio::TrackedFrame> imu_prior_sequence;
+
+    VisualFrontendOutput first_output;
+    first_output.frame.state = first_state;
+    first_output.tracks = frontend_.activeTracks();
+
+    for (const auto& t : frontend_.activeTracks()) {
+        vio::Observation obs;
+        obs.frame_id = first_state.frame_id;
+        obs.track_id = t.id;
+        obs.uv = Eigen::Vector2d(t.pt.x, t.pt.y);
+        obs.valid = true;
+        first_output.frame.observations.push_back(obs);
+    }
+
+    imu_prior_sequence.push_back(first_output.frame);
+    writer.write(drawTrackingVisualization(first_frame, frontend_.activeTracks()));
 
     for (size_t img_idx = start_idx + 1; img_idx < end_idx; ++img_idx) {
         cv::Mat curr_frame = cv::imread(image_paths_[img_idx], cv::IMREAD_COLOR);
@@ -628,109 +549,85 @@ bool ImuTrackingPipeline::runTrackingWithImuPrior()
             continue;
         }
 
-        cv::Mat curr_gray, curr_gray_f, curr_blur;
-
-        cv::cvtColor(curr_frame, curr_gray, cv::COLOR_BGR2GRAY);
-        curr_gray.convertTo(curr_gray_f, CV_32F, 1.0 / 255.0);
-        curr_blur = gaussianBlurCustomFloat(curr_gray_f);
-
-        std::vector<cv::Point2f> pts_prev;
-        std::vector<cv::Point2f> pts_guess;
-
-        pts_prev.reserve(tracks.size());
-        pts_guess.reserve(tracks.size());
-
-        const vio::FrameState curr_state = buildFrameStateFromImu(
+        vio::FrameState curr_state = buildFrameStateFromImu(
             static_cast<int>(img_idx),
             frame_timestamps_[img_idx],
             imu_trajectory_
         );
 
-        for (const auto& t : tracks) {
-            pts_prev.push_back(t.pt);
+        std::vector<cv::Point2f> initial_guess;
+        initial_guess.reserve(frontend_.activeTracks().size());
 
+        for (const auto& t : frontend_.activeTracks()) {
             auto it = landmarks_by_track.find(t.id);
-            if (it != landmarks_by_track.end()) {
-                cv::Point2f uv_pred;
 
-                if (projectLandmarkToFrame(curr_state, camera_intrinsics_, it->second, uv_pred)) {
-                    const float max_jump = 10.0f;
+            if (it == landmarks_by_track.end()) {
+                initial_guess.push_back(t.pt);
+                continue;
+            }
 
-                    const bool inside_image =
-                        uv_pred.x >= 0.0f && uv_pred.x < static_cast<float>(curr_gray.cols) &&
-                        uv_pred.y >= 0.0f && uv_pred.y < static_cast<float>(curr_gray.rows);
+            cv::Point2f uv_pred;
+            const bool ok = projectLandmarkToFrame(
+                curr_state,
+                camera_intrinsics_,
+                it->second,
+                uv_pred
+            );
 
-                    const bool reasonable_jump =
-                        cv::norm(uv_pred - t.pt) < max_jump;
+            if (!ok) {
+                initial_guess.push_back(t.pt);
+                continue;
+            }
 
-                    if (inside_image && reasonable_jump) {
-                        pts_guess.push_back(uv_pred);
-                    } else {
-                        pts_guess.push_back(t.pt);
-                    }
-                } else {
-                    pts_guess.push_back(t.pt);
-                }
+            const bool inside_image =
+                uv_pred.x >= 0.0f &&
+                uv_pred.x < static_cast<float>(curr_frame.cols) &&
+                uv_pred.y >= 0.0f &&
+                uv_pred.y < static_cast<float>(curr_frame.rows);
+
+            const bool reasonable_jump =
+                cv::norm(uv_pred - t.pt) < 10.0f;
+
+            if (inside_image && reasonable_jump) {
+                initial_guess.push_back(uv_pred);
             } else {
-                pts_guess.push_back(t.pt);
+                initial_guess.push_back(t.pt);
             }
         }
 
-        std::vector<cv::Point2f> pts_curr;
-        std::vector<uchar> status;
-        std::vector<float> err;
+        VisualFrontendOutput output;
 
         try {
-            trackPointsPyramidalLKWithGuess(
-                prev_blur,
-                curr_blur,
-                pts_prev,
-                pts_guess,
-                pts_curr,
-                status,
-                err,
-                win_size_,
-                max_level_,
-                max_iters_,
-                eps_
+            output = frontend_.trackWithGuess(
+                static_cast<int>(img_idx),
+                frame_timestamps_[img_idx],
+                curr_frame,
+                curr_state,
+                initial_guess
             );
         } catch (const std::exception& e) {
-            std::cerr << "IMU-prior tracking failed on frame " << img_idx
-                      << ": " << e.what() << "\n";
+            std::cerr << "IMU-prior frontend tracking failed on frame "
+                      << img_idx << ": " << e.what() << "\n";
             return false;
         }
 
-        std::vector<Track> new_tracks;
-        new_tracks.reserve(tracks.size());
+        imu_prior_sequence.push_back(output.frame);
 
-        for (size_t i = 0; i < tracks.size(); ++i) {
-            if (status[i]) {
-                Track updated = tracks[i];
-                updated.pt = pts_curr[i];
-                updated.history.push_back(pts_curr[i]);
-                new_tracks.push_back(updated);
-            }
+        writer.write(drawTrackingVisualization(curr_frame, output.tracks, 15));
+
+        if (output.tracks.empty()) {
+            std::cerr << "No tracks left in IMU-prior tracking on frame "
+                      << img_idx << "\n";
+            break;
         }
 
-        tracks = std::move(new_tracks);
-
-        refreshTracksIfNeeded(curr_gray, tracks, next_track_id, refresh_params);
-
-        appendFrame(
-            static_cast<int>(img_idx),
-            frame_timestamps_[img_idx],
-            tracks
-        );
-        imu_prior_sequence.push_back(sequence_.back());
-        sequence_.pop_back();
-
-        writer.write(drawTrackingVisualization(curr_frame, tracks, 15));
-
-        prev_blur = curr_blur.clone();
-
-        if (tracks.empty()) {
-            std::cerr << "No tracks left in IMU-prior tracking on frame " << img_idx << "\n";
-            break;
+        if (!output.enough_tracks) {
+            frontend_.setPivot(
+                static_cast<int>(img_idx),
+                frame_timestamps_[img_idx],
+                curr_frame,
+                curr_state
+            );
         }
     }
 

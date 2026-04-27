@@ -16,6 +16,14 @@ CTestTestfile.cmake
 Testing/
 Makefile
 
+# Outputs / artifacts
+*.mp4
+*.csv
+
+# PVS Studio
+.PVS-Studio/
+depend_info.json
+
 # Native build outputs
 *.d
 *.o
