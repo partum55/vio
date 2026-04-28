@@ -1,5 +1,6 @@
 #include "frontend/imu_tracking_pipeline.hpp"
 
+#include "core/dataset_streamer.h"
 #include "frontend/frame_pose_sync.hpp"
 #include "io/image_sequence_reader.hpp"
 #include "io/tracked_output_writer.hpp"
@@ -14,7 +15,14 @@
 #include "keypoint_extraction/shi_tomasi.hpp"
 #include "keypoint_extraction/tpool_default.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <filesystem>
+#include <optional>
+#include <thread>
 #include <unordered_map>
+#include <utility>
 
 #include <opencv2/opencv.hpp>
 
@@ -50,6 +58,65 @@ namespace
         }
 
         return tracks;
+    }
+
+    std::int64_t timestampToNs(double timestamp_s)
+    {
+        return static_cast<std::int64_t>(std::llround(timestamp_s * 1e9));
+    }
+
+    vio::Dataset buildStreamingDataset(
+        const std::vector<std::string>& image_paths,
+        const std::vector<double>& frame_timestamps,
+        const std::vector<ImuSample>& imu_samples,
+        size_t start_idx,
+        size_t end_idx
+    )
+    {
+        vio::Dataset dataset;
+        dataset.imu_samples = imu_samples;
+
+        if (start_idx < image_paths.size()) {
+            dataset.root = std::filesystem::path(image_paths[start_idx]).parent_path();
+        }
+
+        dataset.frames.reserve(end_idx - start_idx);
+        for (size_t i = start_idx; i < end_idx; ++i) {
+            vio::DatasetFrame frame;
+            frame.timestamp_s = frame_timestamps[i];
+            frame.timestamp_ns = timestampToNs(frame.timestamp_s);
+            frame.frame_index = i;
+            frame.image_path = image_paths[i];
+            dataset.frames.push_back(std::move(frame));
+        }
+
+        return dataset;
+    }
+
+    void drainStreamedImuSamples(
+        vio::ThreadSafeQueue<ImuSample>& queue,
+        std::optional<ImuSample>& lookahead,
+        double timestamp_s
+    )
+    {
+        if (lookahead) {
+            if (lookahead->t <= timestamp_s) {
+                lookahead.reset();
+            } else {
+                return;
+            }
+        }
+
+        while (true) {
+            auto sample = queue.try_deque();
+            if (!sample) {
+                break;
+            }
+            if (sample->t > timestamp_s) {
+                lookahead = std::move(*sample);
+                break;
+            }
+        }
     }
 }
 
@@ -356,9 +423,29 @@ bool ImuTrackingPipeline::runTrackingAndSync()
         return false;
     }
 
-    cv::Mat first_frame = cv::imread(image_paths_[start_idx], cv::IMREAD_COLOR);
+    vio::Dataset streaming_dataset = buildStreamingDataset(
+        image_paths_,
+        frame_timestamps_,
+        imu_samples_,
+        start_idx,
+        end_idx
+    );
+    vio::DatasetStreamer streamer(streaming_dataset);
+    streamer.start();
+    std::optional<ImuSample> imu_lookahead;
+
+    auto first_cf = streamer.imgQueue().deque();
+    if (!first_cf || first_cf->frame_index != start_idx) {
+        std::cerr << "Failed to read first frame\n";
+        streamer.stop();
+        return false;
+    }
+
+    cv::Mat first_frame = std::move(first_cf->image);
+    drainStreamedImuSamples(streamer.imuQueue(), imu_lookahead, first_cf->timestamp_s);
     if (first_frame.empty()) {
         std::cerr << "Failed to read first frame\n";
+        streamer.stop();
         return false;
     }
 
@@ -373,21 +460,21 @@ bool ImuTrackingPipeline::runTrackingAndSync()
 
     // === INIT PIVOT ===
     vio::FrameState first_state = buildFrameStateFromImu(
-        static_cast<int>(start_idx),
-        frame_timestamps_[start_idx],
+        static_cast<int>(first_cf->frame_index),
+        first_cf->timestamp_s,
         imu_trajectory_
     );
 
     frontend_.setPivot(
-        static_cast<int>(start_idx),
-        frame_timestamps_[start_idx],
+        static_cast<int>(first_cf->frame_index),
+        first_cf->timestamp_s,
         first_frame,
         first_state
     );
 
     auto first_output = frontend_.track(
-        static_cast<int>(start_idx),
-        frame_timestamps_[start_idx],
+        static_cast<int>(first_cf->frame_index),
+        first_cf->timestamp_s,
         first_frame,
         first_state
     );
@@ -396,20 +483,21 @@ bool ImuTrackingPipeline::runTrackingAndSync()
     writer.write(drawTrackingVisualization(first_frame, first_output.tracks));
 
     // === MAIN LOOP ===
-    for (size_t i = start_idx + 1; i < end_idx; ++i) {
-
-        cv::Mat frame = cv::imread(image_paths_[i], cv::IMREAD_COLOR);
-        if (frame.empty()) continue;
+    while (auto cf = streamer.imgQueue().deque()) {
+        cv::Mat frame = std::move(cf->image);
+        const int frame_id = static_cast<int>(cf->frame_index);
+        const double timestamp = cf->timestamp_s;
+        drainStreamedImuSamples(streamer.imuQueue(), imu_lookahead, timestamp);
 
         vio::FrameState state = buildFrameStateFromImu(
-            static_cast<int>(i),
-            frame_timestamps_[i],
+            frame_id,
+            timestamp,
             imu_trajectory_
         );
 
         auto output = frontend_.track(
-            static_cast<int>(i),
-            frame_timestamps_[i],
+            frame_id,
+            timestamp,
             frame,
             state
         );
@@ -420,8 +508,8 @@ bool ImuTrackingPipeline::runTrackingAndSync()
         // === RESET PIVOT ===
         if (!output.enough_tracks) {
             frontend_.setPivot(
-                static_cast<int>(i),
-                frame_timestamps_[i],
+                frame_id,
+                timestamp,
                 frame,
                 state
             );
@@ -486,9 +574,29 @@ bool ImuTrackingPipeline::runTrackingWithImuPrior()
         end_idx = std::min(end_idx, start_idx + max_frames);
     }
 
-    cv::Mat first_frame = cv::imread(image_paths_[start_idx], cv::IMREAD_COLOR);
+    vio::Dataset streaming_dataset = buildStreamingDataset(
+        image_paths_,
+        frame_timestamps_,
+        imu_samples_,
+        start_idx,
+        end_idx
+    );
+    vio::DatasetStreamer streamer(streaming_dataset);
+    streamer.start();
+    std::optional<ImuSample> imu_lookahead;
+
+    auto first_cf = streamer.imgQueue().deque();
+    if (!first_cf || first_cf->frame_index != start_idx) {
+        std::cerr << "Failed to read first image: " << image_paths_[start_idx] << "\n";
+        streamer.stop();
+        return false;
+    }
+
+    cv::Mat first_frame = std::move(first_cf->image);
+    drainStreamedImuSamples(streamer.imuQueue(), imu_lookahead, first_cf->timestamp_s);
     if (first_frame.empty()) {
         std::cerr << "Failed to read first image: " << image_paths_[start_idx] << "\n";
+        streamer.stop();
         return false;
     }
 
@@ -501,24 +609,26 @@ bool ImuTrackingPipeline::runTrackingWithImuPrior()
 
     if (!writer.isOpened()) {
         std::cerr << "Failed to open IMU-prior output video\n";
+        streamer.stop();
         return false;
     }
 
     std::vector<Track> tracks = buildTracksFromFirstFrameSequence(sequence_);
     if (tracks.empty()) {
         std::cerr << "Failed to initialize IMU-prior tracks from sequence\n";
+        streamer.stop();
         return false;
     }
 
     vio::FrameState first_state = buildFrameStateFromImu(
-        static_cast<int>(start_idx),
-        frame_timestamps_[start_idx],
+        static_cast<int>(first_cf->frame_index),
+        first_cf->timestamp_s,
         imu_trajectory_
     );
 
     frontend_.setPivotWithTracks(
-        static_cast<int>(start_idx),
-        frame_timestamps_[start_idx],
+        static_cast<int>(first_cf->frame_index),
+        first_cf->timestamp_s,
         first_frame,
         first_state,
         tracks
@@ -542,16 +652,15 @@ bool ImuTrackingPipeline::runTrackingWithImuPrior()
     imu_prior_sequence.push_back(first_output.frame);
     writer.write(drawTrackingVisualization(first_frame, frontend_.activeTracks()));
 
-    for (size_t img_idx = start_idx + 1; img_idx < end_idx; ++img_idx) {
-        cv::Mat curr_frame = cv::imread(image_paths_[img_idx], cv::IMREAD_COLOR);
-        if (curr_frame.empty()) {
-            std::cerr << "Failed to read image: " << image_paths_[img_idx] << "\n";
-            continue;
-        }
+    while (auto cf = streamer.imgQueue().deque()) {
+        cv::Mat curr_frame = std::move(cf->image);
+        const int frame_id = static_cast<int>(cf->frame_index);
+        const double timestamp = cf->timestamp_s;
+        drainStreamedImuSamples(streamer.imuQueue(), imu_lookahead, timestamp);
 
         vio::FrameState curr_state = buildFrameStateFromImu(
-            static_cast<int>(img_idx),
-            frame_timestamps_[img_idx],
+            frame_id,
+            timestamp,
             imu_trajectory_
         );
 
@@ -599,15 +708,16 @@ bool ImuTrackingPipeline::runTrackingWithImuPrior()
 
         try {
             output = frontend_.trackWithGuess(
-                static_cast<int>(img_idx),
-                frame_timestamps_[img_idx],
+                frame_id,
+                timestamp,
                 curr_frame,
                 curr_state,
                 initial_guess
             );
         } catch (const std::exception& e) {
             std::cerr << "IMU-prior frontend tracking failed on frame "
-                      << img_idx << ": " << e.what() << "\n";
+                      << frame_id << ": " << e.what() << "\n";
+            streamer.stop();
             return false;
         }
 
@@ -617,14 +727,14 @@ bool ImuTrackingPipeline::runTrackingWithImuPrior()
 
         if (output.tracks.empty()) {
             std::cerr << "No tracks left in IMU-prior tracking on frame "
-                      << img_idx << "\n";
+                      << frame_id << "\n";
             break;
         }
 
         if (!output.enough_tracks) {
             frontend_.setPivot(
-                static_cast<int>(img_idx),
-                frame_timestamps_[img_idx],
+                frame_id,
+                timestamp,
                 curr_frame,
                 curr_state
             );

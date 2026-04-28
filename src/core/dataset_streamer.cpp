@@ -76,6 +76,7 @@ void DatasetStreamer::producerLoop(std::stop_token st) {
                 CameraFrame cf;
                 cf.timestamp_ns = df.timestamp_ns;
                 cf.timestamp_s  = df.timestamp_s;
+                cf.frame_index  = df.frame_index;
                 cf.image_path   = df.image_path;
                 cf.image        = std::move(image);
                 img_queue_.enque(std::move(cf));

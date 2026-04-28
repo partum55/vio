@@ -131,6 +131,7 @@ std::vector<DatasetFrame> loadFramesFromCsv(const std::filesystem::path& csv_pat
         DatasetFrame frame;
         frame.timestamp_ns = timestamp_ns;
         frame.timestamp_s = static_cast<double>(timestamp_ns) * 1e-9;
+        frame.frame_index = frames.size();
         frame.image_path = image_dir / filename_field;
         frames.push_back(frame);
     }
@@ -160,6 +161,9 @@ std::vector<DatasetFrame> scanFramesFromDirectory(const std::filesystem::path& i
     std::sort(frames.begin(), frames.end(), [](const DatasetFrame& a, const DatasetFrame& b) {
         return a.timestamp_ns < b.timestamp_ns;
     });
+    for (std::size_t i = 0; i < frames.size(); ++i) {
+        frames[i].frame_index = i;
+    }
     return frames;
 }
 

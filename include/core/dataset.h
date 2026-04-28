@@ -5,6 +5,7 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -31,6 +32,7 @@ struct ImuCalibration {
 struct DatasetFrame {
     std::int64_t timestamp_ns = 0;
     double timestamp_s = 0.0;
+    std::size_t frame_index = 0;
     std::filesystem::path image_path;
 };
 

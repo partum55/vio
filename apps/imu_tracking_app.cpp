@@ -7,8 +7,8 @@ int main()
 {
     ImuTrackingPipeline pipeline;
 
-    pipeline.setImuCsvPath("data/imu/data.csv");
-    pipeline.setImagesDir("data/cam0/undistorted_alpha0");
+    pipeline.setImuCsvPath("data/imu0/data.csv");
+    pipeline.setImagesDir("data/cam0/undistorted_alpha0/");
     pipeline.setFrameTimestampsPath("data/frame_timestamps.txt");
 
     CameraIntrinsics intrinsics;
@@ -19,10 +19,10 @@ int main()
 
     pipeline.setCameraIntrinsics(intrinsics);
 
-    pipeline.setOutputPosesCsv("poses.csv");
-    pipeline.setOutputObservationsCsv("observations.csv");
-    pipeline.setOutputVideoPath("imu_tracking_visualization.mp4");
-    pipeline.setOutputLandmarksCsv("landmarks.csv");
+    pipeline.setOutputPosesCsv("results/poses.csv");
+    pipeline.setOutputObservationsCsv("results/observations.csv");
+    pipeline.setOutputVideoPath("results/imu_tracking_visualization.mp4");
+    pipeline.setOutputLandmarksCsv("results/landmarks.csv");
 
     pipeline.setGravity(Eigen::Vector3d(0.0, 0.0, 9.81));
     pipeline.setTrackingParams(9, 3, 10, 1e-3f);

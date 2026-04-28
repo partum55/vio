@@ -16,6 +16,7 @@ namespace vio {
 struct CameraFrame {
     std::int64_t          timestamp_ns = 0;
     double                timestamp_s  = 0.0;
+    std::size_t           frame_index  = 0;
     std::filesystem::path image_path;
     cv::Mat               image;   // BGR, loaded from disk by producer thread
 };

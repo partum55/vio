@@ -54,6 +54,7 @@ configure_vio_target(vio)
 
 add_executable(imu_tracking_app
     apps/imu_tracking_app.cpp
+    src/core/dataset_streamer.cpp
     src/core/projection.cpp
     src/frontend/feature_extractor.cpp
     src/frontend/feature_tracker.cpp
