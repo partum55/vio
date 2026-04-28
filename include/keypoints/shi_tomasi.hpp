@@ -1,17 +1,18 @@
 #pragma once
 
-#include "keypoints/abc_thread_pool.hpp"
 #include "keypoints/keypoint_detector.hpp"
 
 #include <opencv2/core.hpp>
 
 #include <vector>
 
+class VisionComputeBackend;
+
 namespace vio {
 
 class CustomShiTomasiDetector : public IKeypointDetector {
 public:
-    CustomShiTomasiDetector(ABCThreadPool& pool, int num_tasks);
+    explicit CustomShiTomasiDetector(VisionComputeBackend& backend);
 
     std::vector<cv::Point2f> detect(
         const cv::Mat& img,
@@ -34,8 +35,7 @@ private:
         const cv::Mat& scoreNms,
         const ShiTomasiParams& p);
 
-    ABCThreadPool& pool_;
-    int num_tasks_;
+    VisionComputeBackend& backend_;
 
     cv::Mat blur_;
     cv::Mat Ix_;

@@ -1,8 +1,11 @@
 #include "frontend/feature_tracker.hpp"
 
-#include "tracking/lk_tracker.hpp"
-
 #include <stdexcept>
+
+FeatureTracker::FeatureTracker()
+    : backend_(VisionComputeBackend::createAuto())
+{
+}
 
 void FeatureTracker::setParams(const FeatureTrackerParams& params)
 {
@@ -29,7 +32,7 @@ TrackingResult FeatureTracker::track(
     std::vector<uchar> status;
     std::vector<float> error;
 
-    trackPointsPyramidalLK(
+    backend_->trackPyramidalLK(
         prev_gray,
         curr_gray,
         pts_prev,
@@ -86,7 +89,7 @@ TrackingResult FeatureTracker::trackWithGuess(
     std::vector<uchar> status;
     std::vector<float> error;
 
-    trackPointsPyramidalLKWithGuess(
+    backend_->trackPyramidalLKWithGuess(
         prev_gray,
         curr_gray,
         pts_prev,

@@ -56,6 +56,12 @@ private:
     bool runImu();
     bool runTrackingAndSync();
     bool runTriangulation();
+    void initializeTracks(const cv::Mat& first_gray);
+    void appendFrame(
+        int frame_id,
+        double timestamp,
+        const std::vector<Track>& tracks
+    );
 
 private:
     std::string imu_csv_path_;

@@ -1,6 +1,5 @@
-#include "keypoints/gaussian_blur.hpp"
+#include "frontend/vision_compute_backend.hpp"
 #include "keypoints/shi_tomasi.hpp"
-#include "keypoints/sobel.hpp"
 
 #include <opencv2/imgproc.hpp>
 
@@ -9,11 +8,8 @@
 
 namespace vio {
 
-CustomShiTomasiDetector::CustomShiTomasiDetector(
-    ABCThreadPool& pool,
-    int num_tasks)
-    : pool_(pool),
-      num_tasks_(std::max(1, num_tasks)) {}
+CustomShiTomasiDetector::CustomShiTomasiDetector(VisionComputeBackend& backend)
+    : backend_(backend) {}
 
 cv::Mat CustomShiTomasiDetector::shiTomasiScoreImage(
     const cv::Mat& gray8,
@@ -27,10 +23,10 @@ cv::Mat CustomShiTomasiDetector::shiTomasiScoreImage(
 
     const int blurPasses = std::max(1, static_cast<int>(std::round(p.gaussianSigma)));
     for (int i = 0; i < blurPasses; ++i) {
-        blur_ = gaussianBlurCustom(blur_, pool_, num_tasks_);
+        backend_.gaussianBlur(blur_, blur_);
     }
 
-    centralDifferenceXY(blur_, Ix_, Iy_, pool_, num_tasks_);
+    backend_.sobelGradients(blur_, Ix_, Iy_);
 
     cv::multiply(Ix_, Ix_, Ixx_);
     cv::multiply(Iy_, Iy_, Iyy_);
@@ -38,9 +34,9 @@ cv::Mat CustomShiTomasiDetector::shiTomasiScoreImage(
 
     const int tensorPasses = std::max(1, p.blockSize / 2);
     for (int i = 0; i < tensorPasses; ++i) {
-        Ixx_ = gaussianBlurCustom(Ixx_, pool_, num_tasks_);
-        Iyy_ = gaussianBlurCustom(Iyy_, pool_, num_tasks_);
-        Ixy_ = gaussianBlurCustom(Ixy_, pool_, num_tasks_);
+        backend_.gaussianBlur(Ixx_, Ixx_);
+        backend_.gaussianBlur(Iyy_, Iyy_);
+        backend_.gaussianBlur(Ixy_, Ixy_);
     }
 
     trace_ = Ixx_ + Iyy_;

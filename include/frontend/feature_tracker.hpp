@@ -1,8 +1,10 @@
 #pragma once
 
+#include "frontend/vision_compute_backend.hpp"
 #include "tracking/tracking_vis.hpp"
 
 #include <opencv2/opencv.hpp>
+#include <memory>
 #include <vector>
 
 struct FeatureTrackerParams {
@@ -20,7 +22,7 @@ struct TrackingResult {
 
 class FeatureTracker {
 public:
-    FeatureTracker() = default;
+    FeatureTracker();
 
     void setParams(const FeatureTrackerParams& params);
 
@@ -39,4 +41,5 @@ public:
 
 private:
     FeatureTrackerParams params_;
+    std::shared_ptr<VisionComputeBackend> backend_;
 };

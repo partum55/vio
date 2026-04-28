@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/dataset.h"
-#include "imu/imu.h"
+#include "imu/imu.hpp"
 #include "keypoints/thread_safe_queue.hpp"
 
 #include <opencv2/core.hpp>

@@ -2,10 +2,10 @@
 
 #include "core/data_generator.h"
 #include "core/dataset_streamer.h"
-#include "imu/imu.h"
+#include "imu/imu.hpp"
+#include "frontend/vision_compute_backend.hpp"
 #include "keypoints/shi_tomasi.hpp"
-#include "keypoints/tpool_default.hpp"
-#include "tracking/klt_tracker.h"
+#include "tracking/lk_tracker.hpp"
 
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -516,9 +516,8 @@ RunResult runVisualInertialOdometry(const Dataset& dataset,
         }
     }
 
-    const unsigned hw_threads = std::max(1u, std::thread::hardware_concurrency());
-    ThreadPool pool(static_cast<int>(hw_threads));
-    CustomShiTomasiDetector detector(pool, static_cast<int>(hw_threads));
+    auto compute_backend = VisionComputeBackend::createAuto();
+    CustomShiTomasiDetector detector(*compute_backend);
 
     ShiTomasiParams detector_params;
     detector_params.maxCorners = 600;
@@ -534,9 +533,9 @@ RunResult runVisualInertialOdometry(const Dataset& dataset,
     std::vector<cv::Point2f> prev_points;
 
     Eigen::Vector3d fused_position = Eigen::Vector3d::Zero();
-    ImuPose imu_pose;
+    Pose imu_pose;
     imu_pose.t = dataset.frames.front().timestamp_s;
-    ImuPose prev_imu_pose = imu_pose;
+    Pose prev_imu_pose = imu_pose;
     bool have_previous_frame = false;
     std::size_t imu_index = 0;
 
@@ -569,7 +568,7 @@ RunResult runVisualInertialOdometry(const Dataset& dataset,
             std::vector<cv::Point2f> tracked_points;
             std::vector<uchar> status;
             std::vector<float> err;
-            trackPoints(prev_gray, gray, prev_points, tracked_points, status, err, 9, 3, 12, 1e-3f);
+            trackPointsPyramidalLK(prev_gray, gray, prev_points, tracked_points, status, err, 9, 3, 12, 1e-3f);
 
             std::vector<cv::Point2f> filtered_prev;
             std::vector<cv::Point2f> filtered_curr;
@@ -615,7 +614,7 @@ RunResult runVisualInertialOdometry(const Dataset& dataset,
                 gyro /= static_cast<double>(imu_slice.size());
                 acc /= static_cast<double>(imu_slice.size());
 
-                std::vector<ImuPose> interval_traj;
+                std::vector<Pose> interval_traj;
                 integrateImuFiltered(
                     imu_slice,
                     prev_imu_pose.t,
@@ -710,9 +709,8 @@ RunResult runVisualInertialOdometry(DatasetStreamer& streamer,
         }
     }
 
-    const unsigned hw_threads = std::max(1u, std::thread::hardware_concurrency());
-    ThreadPool pool(static_cast<int>(hw_threads));
-    CustomShiTomasiDetector detector(pool, static_cast<int>(hw_threads));
+    auto compute_backend = VisionComputeBackend::createAuto();
+    CustomShiTomasiDetector detector(*compute_backend);
 
     ShiTomasiParams detector_params;
     detector_params.maxCorners    = 600;
@@ -728,8 +726,8 @@ RunResult runVisualInertialOdometry(DatasetStreamer& streamer,
     std::vector<cv::Point2f> prev_points;
 
     Eigen::Vector3d fused_position = Eigen::Vector3d::Zero();
-    ImuPose imu_pose;
-    ImuPose prev_imu_pose = imu_pose;
+    Pose imu_pose;
+    Pose prev_imu_pose = imu_pose;
     bool have_previous_frame = false;
     std::optional<ImuSample> imu_lookahead;
 
@@ -763,7 +761,7 @@ RunResult runVisualInertialOdometry(DatasetStreamer& streamer,
             std::vector<cv::Point2f> tracked_points;
             std::vector<uchar> status;
             std::vector<float> err;
-            trackPoints(prev_gray, gray, prev_points, tracked_points, status, err, 9, 3, 12, 1e-3f);
+            trackPointsPyramidalLK(prev_gray, gray, prev_points, tracked_points, status, err, 9, 3, 12, 1e-3f);
 
             std::vector<cv::Point2f> filtered_prev;
             std::vector<cv::Point2f> filtered_curr;
@@ -803,7 +801,7 @@ RunResult runVisualInertialOdometry(DatasetStreamer& streamer,
                 gyro /= static_cast<double>(imu_slice.size());
                 acc  /= static_cast<double>(imu_slice.size());
 
-                std::vector<ImuPose> interval_traj;
+                std::vector<Pose> interval_traj;
                 integrateImuFiltered(
                     imu_slice, prev_imu_pose.t, cf->timestamp_s,
                     imu_pose, gravity, interval_traj);
