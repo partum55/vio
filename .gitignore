@@ -1,10 +1,12 @@
 # IDE
 .idea/
+.vscode/
 
 # CLion / CMake build trees
 build/
 cmake-build-*/
 out/
+bin/
 
 # In-source CMake / Make artifacts
 CMakeCache.txt

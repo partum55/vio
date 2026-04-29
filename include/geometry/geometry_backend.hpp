@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/tracked_frame.hpp"
+#include "core/types.hpp"
 #include "geometry/landmark_map.hpp"
 #include "geometry/pnp_solver.hpp"
 #include "geometry/camera_model.hpp"

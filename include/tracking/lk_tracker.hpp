@@ -3,6 +3,8 @@
 #include <opencv2/opencv.hpp>
 #include <vector>
 
+namespace vio {
+
 float getPixelBilinear(const cv::Mat& img, const float x, const float y);
 
 cv::Mat toFloatGray(const cv::Mat& gray);
@@ -84,3 +86,5 @@ void trackPointsPyramidalLKWithGuess(
     const int maxIters = 10,
     const float eps = 1e-3f
 );
+
+} // namespace vio

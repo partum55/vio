@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/tracked_frame.hpp"
+#include "core/types.hpp"
 
 namespace vio {
 

@@ -1,12 +1,12 @@
 #include "tracking/feature_refresh.hpp"
 
-#include "keypoint_extraction/shi_tomasi.hpp"
-#include "keypoint_extraction/tpool_default.hpp"
+#include "frontend/feature_extractor.hpp"
 
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
-#include <thread>
+
+namespace vio {
 
 cv::Mat makeAllowedMask(
     const cv::Size& size,
@@ -53,12 +53,6 @@ void refreshTracksIfNeeded(
         params.suppressionRadius
     );
 
-    const unsigned int numThreads =
-        std::max(1u, std::thread::hardware_concurrency());
-
-    ThreadPool pool(numThreads);
-    CustomShiTomasiDetector detector(pool, static_cast<int>(numThreads));
-
     ShiTomasiParams detectorParams;
     detectorParams.maxCorners = missing;
     detectorParams.qualityLevel = params.qualityLevel;
@@ -67,8 +61,9 @@ void refreshTracksIfNeeded(
     detectorParams.gaussianSigma = 1.0;
     detectorParams.nmsRadius = 2;
 
+    FeatureExtractor extractor;
     std::vector<cv::Point2f> detected =
-        detector.detect(gray, detectorParams, mask);
+        extractor.extract(gray, detectorParams, mask);
 
     for (const auto& p : detected) {
         Track t;
@@ -78,3 +73,5 @@ void refreshTracksIfNeeded(
         tracks.push_back(t);
     }
 }
+
+} // namespace vio

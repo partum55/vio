@@ -1,10 +1,10 @@
 #pragma once
 
-#include "core/tracked_frame.hpp"
-#include "geometry/camera_model.hpp"
-#include "geometry/landmark.hpp"
+#include "core/types.hpp"
 
 #include <vector>
+
+namespace vio {
 
 struct TriangulationParams {
     int min_observations = 2;
@@ -14,8 +14,10 @@ struct TriangulationParams {
     double min_depth = 0.05;
 };
 
-std::vector<vio::Landmark> triangulateLandmarks(
-    const std::vector<vio::TrackedFrame>& sequence,
+std::vector<Landmark> triangulateLandmarks(
+    const std::vector<TrackedFrame>& sequence,
     const CameraIntrinsics& camera_intrinsics,
     const TriangulationParams& params
 );
+
+} // namespace vio

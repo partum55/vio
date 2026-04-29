@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 
+namespace vio {
+
 // Bilinear = двовимірна лінійна інтерполяція.
 float getPixelBilinear(const cv::Mat& img, const float x, const float y)
 {
@@ -509,3 +511,5 @@ void trackPointsPyramidalLKWithGuess(
         err[i] = trackErr;
     }
 }
+
+} // namespace vio

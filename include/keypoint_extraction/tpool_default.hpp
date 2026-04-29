@@ -11,6 +11,8 @@
 #include "function_wrapper.hpp"
 #include "abc_thread_pool.hpp"
 
+namespace vio {
+
 //based on C++ Concurrency in Action, Ch. 9.1 by Williams
 class ThreadPool final : public ABCThreadPool {
 public:
@@ -89,3 +91,5 @@ private:
     std::vector<std::thread> workers_;
     std::atomic_bool stopping_;
 };
+
+} // namespace vio

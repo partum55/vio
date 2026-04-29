@@ -1,8 +1,10 @@
-#include "core/dataset.h"
+#include "io/dataset_loader.hpp"
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <fstream>
+#include <iostream>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
@@ -167,7 +169,94 @@ std::vector<DatasetFrame> scanFramesFromDirectory(const std::filesystem::path& i
     return frames;
 }
 
+std::vector<double> loadFrameTimestamps(const std::filesystem::path& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        throw std::runtime_error("could not open frame timestamps: " + path.string());
+    }
+
+    std::vector<double> timestamps;
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+
+        std::stringstream ss(line);
+        std::string first_field;
+        if (!std::getline(ss, first_field, ',')) {
+            continue;
+        }
+
+        const double raw = std::stod(first_field);
+        timestamps.push_back(raw > 1.0e12 ? raw * 1.0e-9 : raw);
+    }
+
+    return timestamps;
+}
+
+CameraCalibration toCameraCalibration(const CameraIntrinsics& intrinsics) {
+    CameraCalibration calibration;
+    calibration.width = intrinsics.width;
+    calibration.height = intrinsics.height;
+    calibration.fx = intrinsics.fx;
+    calibration.fy = intrinsics.fy;
+    calibration.cx = intrinsics.cx;
+    calibration.cy = intrinsics.cy;
+    return calibration;
+}
+
 } // namespace
+
+Dataset loadDataset(const DatasetLoadOptions& options) {
+    if (options.imu_csv_path.empty()) {
+        throw std::runtime_error("DatasetLoadOptions::imu_csv_path is empty");
+    }
+    if (options.images_dir.empty()) {
+        throw std::runtime_error("DatasetLoadOptions::images_dir is empty");
+    }
+    if (!options.camera_intrinsics.isValid()) {
+        throw std::runtime_error("DatasetLoadOptions::camera_intrinsics is invalid");
+    }
+
+    Dataset dataset;
+    dataset.root = std::filesystem::absolute(options.images_dir).parent_path();
+    dataset.camera = toCameraCalibration(options.camera_intrinsics);
+
+    dataset.frames = scanFramesFromDirectory(options.images_dir);
+    if (dataset.frames.empty()) {
+        throw std::runtime_error("no camera frames found in " + options.images_dir.string());
+    }
+
+    if (!options.frame_timestamps_path.empty()) {
+        const std::vector<double> timestamps =
+            loadFrameTimestamps(options.frame_timestamps_path);
+        if (timestamps.size() != dataset.frames.size()) {
+            throw std::runtime_error(
+                "frame timestamp count does not match image count: " +
+                std::to_string(timestamps.size()) + " timestamps vs " +
+                std::to_string(dataset.frames.size()) + " images"
+            );
+        }
+
+        for (std::size_t i = 0; i < dataset.frames.size(); ++i) {
+            dataset.frames[i].timestamp_s = timestamps[i];
+            dataset.frames[i].timestamp_ns =
+                static_cast<std::int64_t>(std::llround(timestamps[i] * 1.0e9));
+            dataset.frames[i].frame_index = i;
+        }
+    }
+
+    if (!loadImuCsv(options.imu_csv_path.string(), dataset.imu_samples) ||
+        dataset.imu_samples.empty()) {
+        throw std::runtime_error("failed to load IMU CSV: " + options.imu_csv_path.string());
+    }
+
+    std::sort(dataset.imu_samples.begin(), dataset.imu_samples.end(),
+        [](const ImuSample& a, const ImuSample& b) { return a.t < b.t; });
+
+    return dataset;
+}
 
 Dataset loadEurocDataset(const std::filesystem::path& root) {
     Dataset dataset;

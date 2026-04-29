@@ -4,7 +4,11 @@
 #include <string>
 #include <vector>
 
+namespace vio {
+
 bool writeLandmarksCsv(
     const std::string& path,
-    const std::vector<vio::Landmark>& landmarks
+    const std::vector<Landmark>& landmarks
 );
+
+} // namespace vio

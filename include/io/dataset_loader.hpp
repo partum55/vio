@@ -1,6 +1,7 @@
 #pragma once
 
-#include "imu/imu.hpp"
+#include "core/types.hpp"
+#include "imu/imu_processor.hpp"
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -44,6 +45,14 @@ struct Dataset {
     std::vector<ImuSample> imu_samples;
 };
 
+struct DatasetLoadOptions {
+    std::filesystem::path imu_csv_path;
+    std::filesystem::path images_dir;
+    std::filesystem::path frame_timestamps_path;
+    CameraIntrinsics camera_intrinsics;
+};
+
+Dataset loadDataset(const DatasetLoadOptions& options);
 Dataset loadEurocDataset(const std::filesystem::path& root);
 
 } // namespace vio

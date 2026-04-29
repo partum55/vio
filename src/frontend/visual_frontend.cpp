@@ -1,6 +1,10 @@
 #include "frontend/visual_frontend.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <stdexcept>
+
+namespace vio {
 
 VisualFrontend::VisualFrontend()
 {
@@ -130,12 +134,7 @@ VisualFrontendOutput VisualFrontend::track(
 
     active_tracks_ = tracked.tracks;
 
-    refreshTracksIfNeeded(
-        curr_gray,
-        active_tracks_,
-        next_track_id_,
-        params_.refresh
-    );
+    refreshTracksIfNeeded(curr_gray);
 
     VisualFrontendOutput output;
     output.tracks = active_tracks_;
@@ -167,12 +166,7 @@ VisualFrontendOutput VisualFrontend::trackWithGuess(
 
     active_tracks_ = tracked.tracks;
 
-    refreshTracksIfNeeded(
-        curr_gray,
-        active_tracks_,
-        next_track_id_,
-        params_.refresh
-    );
+    refreshTracksIfNeeded(curr_gray);
 
     VisualFrontendOutput output;
     output.tracks = active_tracks_;
@@ -200,6 +194,46 @@ const PivotFrame& VisualFrontend::pivot() const
 const std::vector<Track>& VisualFrontend::activeTracks() const
 {
     return active_tracks_;
+}
+
+void VisualFrontend::refreshTracksIfNeeded(const cv::Mat& gray)
+{
+    if (gray.empty()) {
+        throw std::runtime_error("VisualFrontend::refreshTracksIfNeeded: empty image");
+    }
+
+    if (static_cast<int>(active_tracks_.size()) >= params_.refresh.minTrackedFeatures) {
+        return;
+    }
+
+    const int missing = params_.refresh.targetFeatures -
+        static_cast<int>(active_tracks_.size());
+    if (missing <= 0) {
+        return;
+    }
+
+    cv::Mat mask(gray.size(), CV_8UC1, cv::Scalar(255));
+    const int radius = std::max(
+        1,
+        static_cast<int>(std::round(params_.refresh.suppressionRadius))
+    );
+
+    for (const Track& track : active_tracks_) {
+        cv::circle(mask, track.pt, radius, cv::Scalar(0), cv::FILLED);
+    }
+
+    ShiTomasiParams detector_params;
+    detector_params.maxCorners = missing;
+    detector_params.qualityLevel = params_.refresh.qualityLevel;
+    detector_params.minDistance = params_.refresh.minDistance;
+    detector_params.blockSize = 5;
+    detector_params.gaussianSigma = 1.0;
+    detector_params.nmsRadius = 2;
+
+    const std::vector<cv::Point2f> detected =
+        extractor_.extract(gray, detector_params, mask);
+    std::vector<Track> new_tracks = makeTracks(detected);
+    active_tracks_.insert(active_tracks_.end(), new_tracks.begin(), new_tracks.end());
 }
 
 void VisualFrontend::setPivotWithTracks(
@@ -231,3 +265,5 @@ void VisualFrontend::setPivotWithTracks(
         active_tracks_
     );
 }
+
+} // namespace vio

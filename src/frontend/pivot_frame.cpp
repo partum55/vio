@@ -2,11 +2,13 @@
 
 #include <stdexcept>
 
+namespace vio {
+
 void PivotFrame::set(
     int frame_id,
     double timestamp,
     const cv::Mat& gray,
-    const vio::FrameState& pose,
+    const FrameState& pose,
     const std::vector<Track>& tracks
 ) {
     if (gray.empty()) {
@@ -45,7 +47,7 @@ const cv::Mat& PivotFrame::gray() const
     return gray_;
 }
 
-const vio::FrameState& PivotFrame::pose() const
+const FrameState& PivotFrame::pose() const
 {
     return pose_;
 }
@@ -54,3 +56,5 @@ const std::vector<Track>& PivotFrame::tracks() const
 {
     return tracks_;
 }
+
+} // namespace vio

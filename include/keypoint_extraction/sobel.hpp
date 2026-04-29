@@ -4,6 +4,8 @@
 
 #include <opencv2/opencv.hpp>
 
+namespace vio {
+
 cv::Mat derivativeXCentral(
     const cv::Mat& image,
     ABCThreadPool& pool,
@@ -20,3 +22,5 @@ void centralDifferenceXY(
     cv::Mat& gy,
     ABCThreadPool& pool,
     int num_tasks);
+
+} // namespace vio

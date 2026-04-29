@@ -7,6 +7,8 @@
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 
+namespace vio {
+
 struct ImuSample {
     double t = 0.0;
     Eigen::Vector3d gyro = Eigen::Vector3d::Zero(); // rad/s
@@ -15,6 +17,8 @@ struct ImuSample {
 
 struct Pose {
     double t = 0.0;
+    // IMU/body pose prior. Do not treat this as a camera pose unless the
+    // calibrated body-to-camera extrinsic has been explicitly applied.
     Eigen::Quaterniond q = Eigen::Quaterniond(1, 0, 0, 0);
     Eigen::Vector3d v = Eigen::Vector3d::Zero();
     Eigen::Vector3d p = Eigen::Vector3d::Zero();
@@ -78,3 +82,5 @@ void integrateImuRaw(
 bool loadImuCsv(const std::string& path, std::vector<ImuSample>& out);
 
 bool saveTrajectoryCsv(const std::string& path, const std::vector<Pose>& traj);
+
+} // namespace vio

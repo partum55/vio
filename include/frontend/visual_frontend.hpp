@@ -1,13 +1,22 @@
 #pragma once
 
-#include "core/tracked_frame.hpp"
+#include "core/types.hpp"
 #include "frontend/feature_extractor.hpp"
 #include "frontend/feature_tracker.hpp"
 #include "frontend/pivot_frame.hpp"
-#include "tracking/feature_refresh.hpp"
 
 #include <opencv2/opencv.hpp>
 #include <vector>
+
+namespace vio {
+
+struct FeatureRefreshParams {
+    int minTrackedFeatures = 50;
+    int targetFeatures = 100;
+    float suppressionRadius = 10.0f;
+    double qualityLevel = 0.01;
+    double minDistance = 10.0;
+};
 
 struct VisualFrontendParams {
     FeatureTrackerParams tracker;
@@ -72,6 +81,8 @@ private:
         const std::vector<cv::Point2f>& points
     );
 
+    void refreshTracksIfNeeded(const cv::Mat& gray);
+
     vio::TrackedFrame makeTrackedFrame(
         const vio::FrameState& pose,
         const std::vector<Track>& tracks
@@ -87,3 +98,5 @@ private:
     std::vector<Track> active_tracks_;
     int next_track_id_ = 0;
 };
+
+} // namespace vio

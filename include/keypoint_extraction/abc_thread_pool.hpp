@@ -3,6 +3,8 @@
 #include <functional>
 #include <future>
 
+namespace vio {
+
 class ABCThreadPool {
 public:
     virtual ~ABCThreadPool() = default;
@@ -10,3 +12,5 @@ public:
     virtual std::future<void> submit_task(std::function<void()> task) = 0;
     virtual bool run_pending_task() = 0;
 };
+
+} // namespace vio

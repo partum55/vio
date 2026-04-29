@@ -1,13 +1,28 @@
 #pragma once
 
-#include "core/tracked_frame.hpp"
-#include "pipeline/pipeline_pivot.hpp"
-#include "geometry/geometry_backend.hpp"
+#include "core/types.hpp"
 #include "geometry/landmark_map.hpp"
+#include "geometry/pnp_solver.hpp"
+#include "geometry/triangulator.hpp"
 
+#include <cstddef>
+#include <filesystem>
+#include <functional>
+#include <string>
 #include <vector>
 
 namespace vio {
+
+    enum class VioStatus {
+        Uninitialized,
+        NeedFirstFrame,
+        TrackingFromPivot,
+        NeedInitialLandmarks,
+        TrackingWithMap,
+        LostTracking,
+        Finished,
+        Failed
+    };
 
     struct VioPipelineParams {
         int min_tracked_points = 20;
@@ -22,16 +37,58 @@ namespace vio {
 
         // Reject obviously broken pose jumps before triangulation/PnP refresh.
         double max_pose_baseline = 1.2;
+        double min_pose_baseline_translation = 0.05;
+        double min_pose_baseline_rotation_deg = 3.0;
 
         // PnP must have enough RANSAC inliers to be allowed to update the pose.
         int min_pnp_inliers = 14;
     };
 
+    struct VioRunConfig {
+        std::string imu_csv_path;
+        std::string images_dir;
+        std::string frame_timestamps_path;
+
+        std::string output_poses_csv = "poses.csv";
+        std::string output_observations_csv = "observations.csv";
+        std::string output_video_path = "imu_tracking_visualization.mp4";
+        std::string output_landmarks_csv = "landmarks.csv";
+
+        Eigen::Vector3d gravity = Eigen::Vector3d(0.0, 0.0, 9.81);
+        CameraIntrinsics camera_intrinsics;
+        TriangulationParams triangulation;
+
+        int tracker_win_size = 9;
+        int tracker_max_level = 3;
+        int tracker_max_iters = 10;
+        float tracker_eps = 1e-3f;
+
+        bool stream_realtime = false;
+        double stream_rate = 1.0;
+        std::size_t stream_max_image_queue = 8;
+
+        std::function<void(
+            const TrackedFrame& frame,
+            const std::vector<Landmark>& landmarks,
+            VioStatus status,
+            const std::filesystem::path& image_path)> frame_logger;
+    };
+
+    struct VioRunResult {
+        bool success = false;
+        VioStatus status = VioStatus::Uninitialized;
+        std::size_t frame_count = 0;
+        std::size_t landmark_count = 0;
+        std::string error;
+    };
+
     class VioPipeline {
     public:
         explicit VioPipeline(
-            GeometryBackend geometry,
-            const VioPipelineParams& params = VioPipelineParams{}
+            const CameraIntrinsics& intrinsics,
+            const VioPipelineParams& params = VioPipelineParams{},
+            const TriangulationParams& triangulation_params = TriangulationParams{},
+            const PnPParams& pnp_params = PnPParams{}
         );
 
         void reset();
@@ -39,6 +96,11 @@ namespace vio {
 
         const std::vector<TrackedFrame>& frames() const;
         const LandmarkMap& landmarks() const;
+        VioStatus status() const;
+        bool hasCurrentPose() const;
+        FrameState currentPose() const;
+
+        static VioRunResult runConfigured(const VioRunConfig& config);
 
     private:
         enum class Stage {
@@ -52,6 +114,7 @@ namespace vio {
 
         double poseBaseline(const TrackedFrame& current) const;
         double robustPixelBaseline(const TrackedFrame& current, int* shared_count = nullptr) const;
+        bool poseBaselineReady(const TrackedFrame& current) const;
         bool baselineReady(const TrackedFrame& current) const;
         bool baselineReasonable(const TrackedFrame& current) const;
 
@@ -62,11 +125,15 @@ namespace vio {
         void resetTrackingSegment(const TrackedFrame& current);
 
     private:
-        GeometryBackend geometry_;
+        CameraIntrinsics intrinsics_;
         VioPipelineParams params_;
+        TriangulationParams triangulation_params_;
+        PnPSolver pnp_solver_;
 
         Stage stage_ = Stage::NeedPivot;
-        PipelinePivot pivot_;
+        VioStatus status_ = VioStatus::Uninitialized;
+        TrackedFrame pivot_;
+        bool pivot_valid_ = false;
         LandmarkMap landmark_map_;
 
         std::vector<TrackedFrame> frames_;

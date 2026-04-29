@@ -1,22 +1,21 @@
 #include "frontend/vision_compute_backend.hpp"
 
-#include "keypoint_extraction/gaussian_blur.hpp"
-#include "keypoint_extraction/sobel.hpp"
-#include "keypoint_extraction/tpool_default.hpp"
-#include "tracking/lk_tracker.hpp"
-
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
-#include <thread>
 #include <utility>
+
+#include <opencv2/imgproc.hpp>
+#include <opencv2/video/tracking.hpp>
 
 #ifdef VIO_HAVE_OPENCL
 #include <CL/cl.h>
 #endif
+
+namespace vio {
 
 std::string gpuModeFromEnv()
 {
@@ -36,8 +35,6 @@ class CpuVisionComputeBackend final : public VisionComputeBackend {
 public:
     explicit CpuVisionComputeBackend(std::string reason = {})
         : name_(reason.empty() ? "CPU custom LK" : "CPU custom LK (" + reason + ")")
-        , num_threads_(static_cast<int>(std::max(1u, std::thread::hardware_concurrency())))
-        , pool_(num_threads_)
     {
     }
 
@@ -53,12 +50,13 @@ public:
 
     void gaussianBlur(const cv::Mat& src, cv::Mat& dst) const override
     {
-        dst = gaussianBlurCustomFloat(src);
+        cv::GaussianBlur(src, dst, cv::Size(3, 3), 0.0, 0.0, cv::BORDER_REPLICATE);
     }
 
     void sobelGradients(const cv::Mat& src, cv::Mat& gx, cv::Mat& gy) const override
     {
-        computeGradients(src, gx, gy);
+        cv::Sobel(src, gx, CV_32F, 1, 0, 3, 1.0, 0.0, cv::BORDER_REPLICATE);
+        cv::Sobel(src, gy, CV_32F, 0, 1, 3, 1.0, 0.0, cv::BORDER_REPLICATE);
     }
 
     void trackPyramidalLK(
@@ -73,17 +71,20 @@ public:
         int max_iters,
         float eps
     ) const override {
-        trackPointsPyramidalLK(
+        cv::calcOpticalFlowPyrLK(
             prev_gray,
             curr_gray,
             pts0,
             pts1,
             status,
             err,
-            win_size,
+            cv::Size(win_size, win_size),
             max_level,
-            max_iters,
-            eps
+            cv::TermCriteria(
+                cv::TermCriteria::COUNT | cv::TermCriteria::EPS,
+                max_iters,
+                eps
+            )
         );
     }
 
@@ -100,25 +101,27 @@ public:
         int max_iters,
         float eps
     ) const override {
-        trackPointsPyramidalLKWithGuess(
+        pts1 = initial_guess;
+        cv::calcOpticalFlowPyrLK(
             prev_gray,
             curr_gray,
             pts0,
-            initial_guess,
             pts1,
             status,
             err,
-            win_size,
+            cv::Size(win_size, win_size),
             max_level,
-            max_iters,
-            eps
+            cv::TermCriteria(
+                cv::TermCriteria::COUNT | cv::TermCriteria::EPS,
+                max_iters,
+                eps
+            ),
+            cv::OPTFLOW_USE_INITIAL_FLOW
         );
     }
 
 private:
     std::string name_;
-    int num_threads_;
-    mutable ThreadPool pool_;
 };
 
 #if defined(VIO_HAVE_OPENCL)
@@ -984,3 +987,4 @@ std::shared_ptr<VisionComputeBackend> VisionComputeBackend::createAuto()
 #endif
 }
 
+} // namespace vio

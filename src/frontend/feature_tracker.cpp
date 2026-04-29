@@ -2,6 +2,8 @@
 
 #include <stdexcept>
 
+namespace vio {
+
 FeatureTracker::FeatureTracker()
     : backend_(VisionComputeBackend::createAuto())
 {
@@ -31,6 +33,10 @@ TrackingResult FeatureTracker::track(
     std::vector<cv::Point2f> pts_curr;
     std::vector<uchar> status;
     std::vector<float> error;
+
+    if (pts_prev.empty()) {
+        return TrackingResult{};
+    }
 
     backend_->trackPyramidalLK(
         prev_gray,
@@ -89,6 +95,10 @@ TrackingResult FeatureTracker::trackWithGuess(
     std::vector<uchar> status;
     std::vector<float> error;
 
+    if (pts_prev.empty()) {
+        return TrackingResult{};
+    }
+
     backend_->trackPyramidalLKWithGuess(
         prev_gray,
         curr_gray,
@@ -121,3 +131,5 @@ TrackingResult FeatureTracker::trackWithGuess(
 
     return result;
 }
+
+} // namespace vio

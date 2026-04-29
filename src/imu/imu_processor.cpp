@@ -1,4 +1,4 @@
-#include "imu/imu.hpp"
+#include "imu/imu_processor.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -7,6 +7,8 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+
+namespace vio {
 
 namespace
 {
@@ -561,3 +563,5 @@ bool saveTrajectoryCsv(const std::string& path, const std::vector<Pose>& traj)
 
     return true;
 }
+
+} // namespace vio

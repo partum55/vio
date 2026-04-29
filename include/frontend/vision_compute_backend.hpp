@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+namespace vio {
+
 class VisionComputeBackend {
 public:
     virtual ~VisionComputeBackend() = default;
@@ -49,3 +51,4 @@ public:
     static std::shared_ptr<VisionComputeBackend> createAuto();
 };
 
+} // namespace vio

@@ -1,14 +1,16 @@
 #include "keypoint_extraction/gaussian_blur.hpp"
 #include "keypoint_extraction/parallel_utils.hpp"
+#include <oneapi/tbb/blocked_range.h>
+#include <oneapi/tbb/global_control.h>
+#include <oneapi/tbb/parallel_for.h>
 
 #include <algorithm>
-#include <atomic>
-#include <future>
-#include <vector>
 
 #if defined(__AVX2__)
 #include <immintrin.h>
 #endif
+
+namespace vio {
 
 namespace
 {
@@ -196,6 +198,8 @@ void gaussianBlurCustomBanded(
     int num_threads,
     int rows_per_chunk)
 {
+    (void)pool;
+
     CV_Assert(image.type() == CV_32F);
     CV_Assert(image.cols >= 2);
 
@@ -203,66 +207,46 @@ void gaussianBlurCustomBanded(
 
     ensureFloatMat(result, image.size());
 
-    const int threads = std::max(1, num_threads);
+    const int threads = std::max(1, std::min(num_threads, image.rows));
     const int chunk_rows = std::max(8, rows_per_chunk);
+    oneapi::tbb::global_control gc(
+        oneapi::tbb::global_control::max_allowed_parallelism,
+        static_cast<std::size_t>(threads)
+    );
+    oneapi::tbb::parallel_for(
+        oneapi::tbb::blocked_range<int>(0, image.rows, chunk_rows),
+        [&](const oneapi::tbb::blocked_range<int>& range)
+        {
+            const int y0 = range.begin();
+            const int y1 = range.end();
+            const int local_rows = y1 - y0;
+            cv::Mat localTemp(local_rows + 2, image.cols, CV_32F);
 
-    std::atomic<int> next_row{0};
-    std::vector<std::future<void>> futures;
-    futures.reserve(threads);
+            for (int ly = 0; ly < local_rows + 2; ++ly)
+            {
+                const int gy = std::clamp(y0 + ly - 1, 0, image.rows - 1);
+                const float* src = image.ptr<float>(gy);
+                float* dst = localTemp.ptr<float>(ly);
+                convolveHorizontalSingleRow(src, dst, image.cols, kernel);
+            }
 
-    for (int t = 0; t < threads; ++t)
-    {
-        futures.emplace_back(
-            pool.submit_task(
-                [&, chunk_rows]()
-                {
-                    cv::Mat localTemp(chunk_rows + 2, image.cols, CV_32F);
+            for (int y = y0; y < y1; ++y)
+            {
+                const int ly = (y - y0) + 1;
+                const float* up   = localTemp.ptr<float>(ly - 1);
+                const float* mid  = localTemp.ptr<float>(ly);
+                const float* down = localTemp.ptr<float>(ly + 1);
+                float* dst = result.ptr<float>(y);
 
-                    while (true)
-                    {
-                        const int y0 = next_row.fetch_add(chunk_rows);
-                        if (y0 >= image.rows)
-                        {
-                            break;
-                        }
-
-                        const int y1 = std::min(image.rows, y0 + chunk_rows);
-                        const int local_rows = y1 - y0;
-
-                        for (int ly = 0; ly < local_rows + 2; ++ly)
-                        {
-                            const int gy = std::clamp(y0 + ly - 1, 0, image.rows - 1);
-                            const float* src = image.ptr<float>(gy);
-                            float* dst = localTemp.ptr<float>(ly);
-
-                            convolveHorizontalSingleRow(src, dst, image.cols, kernel);
-                        }
-
-                        for (int y = y0; y < y1; ++y)
-                        {
-                            const int ly = (y - y0) + 1;
-
-                            const float* up   = localTemp.ptr<float>(ly - 1);
-                            const float* mid  = localTemp.ptr<float>(ly);
-                            const float* down = localTemp.ptr<float>(ly + 1);
-                            float* dst = result.ptr<float>(y);
-
-                            convolveVerticalThreeRows(
-                                up,
-                                mid,
-                                down,
-                                dst,
-                                image.cols,
-                                kernel);
-                        }
-                    }
-                }));
-    }
-
-    for (auto& f : futures)
-    {
-        f.get();
-    }
+                convolveVerticalThreeRows(
+                    up,
+                    mid,
+                    down,
+                    dst,
+                    image.cols,
+                    kernel);
+            }
+        });
 }
 
 cv::Mat gaussianBlurCustomBanded(
@@ -275,3 +259,5 @@ cv::Mat gaussianBlurCustomBanded(
     gaussianBlurCustomBanded(image, result, pool, num_threads, rows_per_chunk);
     return result;
 }
+
+} // namespace vio

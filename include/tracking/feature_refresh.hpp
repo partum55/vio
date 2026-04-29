@@ -5,6 +5,8 @@
 
 #include "tracking/tracking_vis.hpp"
 
+namespace vio {
+
 struct FeatureRefreshParams
 {
     int minTrackedFeatures = 50;
@@ -26,3 +28,5 @@ void refreshTracksIfNeeded(
     int& nextTrackId,
     const FeatureRefreshParams& params
 );
+
+} // namespace vio

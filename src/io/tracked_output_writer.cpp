@@ -1,13 +1,15 @@
 #include "io/tracked_output_writer.hpp"
-#include "core/tracked_frame.hpp"
+#include "core/types.hpp"
 #include <vector>
 
 #include <fstream>
 #include <iomanip>
 
+namespace vio {
+
 bool writeFrameStatesCsv(
     const std::string& path,
-    const std::vector<vio::TrackedFrame>& sequence
+    const std::vector<TrackedFrame>& sequence
 )
 {
     std::ofstream out(path);
@@ -34,7 +36,7 @@ bool writeFrameStatesCsv(
 
 bool writeObservationsCsv(
     const std::string& path,
-    const std::vector<vio::TrackedFrame>& sequence
+    const std::vector<TrackedFrame>& sequence
 )
 {
     std::ofstream out(path);
@@ -59,3 +61,5 @@ bool writeObservationsCsv(
 
     return true;
 }
+
+} // namespace vio

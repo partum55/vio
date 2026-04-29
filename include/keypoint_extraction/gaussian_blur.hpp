@@ -4,6 +4,8 @@
 
 #include <opencv2/opencv.hpp>
 
+namespace vio {
+
 void convolveHorizontalReplicate(
     const cv::Mat& image,
     cv::Mat& result,
@@ -41,3 +43,5 @@ cv::Mat gaussianBlurCustomBanded(
     ABCThreadPool& pool,
     int num_threads,
     int rows_per_chunk = 64);
+
+} // namespace vio

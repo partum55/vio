@@ -5,9 +5,11 @@
 #include <iomanip>
 #include <vector>
 
+namespace vio {
+
 bool writeLandmarksCsv(
     const std::string& path,
-    const std::vector<vio::Landmark>& landmarks
+    const std::vector<Landmark>& landmarks
 )
 {
     std::ofstream out(path);
@@ -31,3 +33,5 @@ bool writeLandmarksCsv(
 
     return true;
 }
+
+} // namespace vio

@@ -1,11 +1,13 @@
 #pragma once
 
+#include "core/types.hpp"
 #include "frontend/vision_compute_backend.hpp"
-#include "tracking/tracking_vis.hpp"
 
 #include <opencv2/opencv.hpp>
 #include <memory>
 #include <vector>
+
+namespace vio {
 
 struct FeatureTrackerParams {
     int winSize = 9;
@@ -43,3 +45,5 @@ private:
     FeatureTrackerParams params_;
     std::shared_ptr<VisionComputeBackend> backend_;
 };
+
+} // namespace vio

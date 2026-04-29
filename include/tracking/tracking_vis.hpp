@@ -1,14 +1,11 @@
 #pragma once
 
+#include "core/types.hpp"
+
 #include <opencv2/opencv.hpp>
 #include <vector>
 
-struct Track
-{
-    int id;
-    cv::Point2f pt;
-    std::vector<cv::Point2f> history;
-};
+namespace vio {
 
 float pointDistance(const cv::Point2f& a, const cv::Point2f& b);
 
@@ -32,3 +29,5 @@ cv::Mat drawTrackingVisualization(
     const std::vector<Track>& tracks,
     const int tailLength = 15
 );
+
+} // namespace vio

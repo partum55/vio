@@ -6,6 +6,8 @@
 
 #include <vector>
 
+namespace vio {
+
 struct ShiTomasiParams
 {
     int maxCorners = 500;
@@ -102,3 +104,5 @@ cv::Mat drawKeypointsOnImage(
     const std::vector<cv::Point2f>& pts,
     int radius = 3,
     int thickness = 1);
+
+} // namespace vio

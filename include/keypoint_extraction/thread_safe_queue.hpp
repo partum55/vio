@@ -1,11 +1,15 @@
 #pragma once
 
+#include <oneapi/tbb/concurrent_queue.h>
+
+#include <atomic>
 #include <condition_variable>
 #include <cstddef>
-#include <deque>
 #include <mutex>
 #include <optional>
 #include <utility>
+
+namespace vio {
 
 template <class T>
 class ThreadSafeQueue final {
@@ -23,95 +27,108 @@ public:
 
     //copy
     bool enque(const T& value) {
-        {
-            std::lock_guard<std::mutex> lg(m_);
-            if (closed_) return false;
-            q_.push_back(value);
+        if (closed_.load(std::memory_order_acquire)) {
+            return false;
         }
+
+        {
+            std::lock_guard<std::mutex> lock(state_m_);
+            if (closed_.load(std::memory_order_relaxed)) {
+                return false;
+            }
+            q_.push(value);
+            size_.fetch_add(1, std::memory_order_release);
+        }
+
         cv_.notify_one();
         return true;
     }
 
     //move
     bool enque(T&& value) {
-        {
-            std::lock_guard<std::mutex> lg(m_);
-            if (closed_) return false;
-            q_.push_back(std::move(value));
+        if (closed_.load(std::memory_order_acquire)) {
+            return false;
         }
+
+        {
+            std::lock_guard<std::mutex> lock(state_m_);
+            if (closed_.load(std::memory_order_relaxed)) {
+                return false;
+            }
+            q_.push(std::move(value));
+            size_.fetch_add(1, std::memory_order_release);
+        }
+
         cv_.notify_one();
         return true;
     }
 
     template <class... Args>
     bool emplace(Args&&... args) {
-        {
-            std::lock_guard<std::mutex> lg(m_);
-            if (closed_) return false;
-            q_.emplace_back(std::forward<Args>(args)...);
-        }
-        cv_.notify_one();
-        return true;
+        return enque(T(std::forward<Args>(args)...));
     }
 
     //blocking
     std::optional<T> deque() {
-        std::unique_lock<std::mutex> ul(m_);
-        cv_.wait(ul, [this] {
-            return closed_ || !q_.empty();
-        });
+        while (true) {
+            T value;
+            if (q_.try_pop(value)) {
+                size_.fetch_sub(1, std::memory_order_acq_rel);
+                cv_.notify_all();
+                return value;
+            }
 
-        if (q_.empty()) {
-            return std::nullopt;
+            std::unique_lock<std::mutex> ul(wait_m_);
+            cv_.wait(ul, [this] {
+                return closed_.load(std::memory_order_acquire) ||
+                       size_.load(std::memory_order_acquire) > 0;
+            });
+
+            if (closed_.load(std::memory_order_acquire) &&
+                size_.load(std::memory_order_acquire) == 0) {
+                return std::nullopt;
+            }
         }
-
-        T value = std::move(q_.front());
-        q_.pop_front();
-        return value;
     }
 
     //doesn`t wait
     std::optional<T> try_deque() {
-        std::lock_guard<std::mutex> lg(m_);
-        if (q_.empty()) return std::nullopt;
+        T value;
+        if (!q_.try_pop(value)) {
+            return std::nullopt;
+        }
 
-        T value = std::move(q_.front());
-        q_.pop_front();
+        size_.fetch_sub(1, std::memory_order_acq_rel);
+        cv_.notify_all();
         return value;
     }
 
     bool empty() const {
-        std::lock_guard<std::mutex> lg(m_);
-        return q_.empty();
+        return size_.load(std::memory_order_acquire) == 0;
     }
 
     std::size_t size() const {
-        std::lock_guard<std::mutex> lg(m_);
-        return q_.size();
+        return size_.load(std::memory_order_acquire);
     }
 
     void close() noexcept {
-        bool need_notify = false;
-        {
-            std::lock_guard<std::mutex> lg(m_);
-            if (!closed_) {
-                closed_ = true;
-                need_notify = true;
-            }
-        }
-        if (need_notify) {
+        const bool was_open = !closed_.exchange(true, std::memory_order_acq_rel);
+        if (was_open) {
             cv_.notify_all();
         }
     }
 
     bool is_closed() const {
-        std::lock_guard<std::mutex> lg(m_);
-        return closed_;
+        return closed_.load(std::memory_order_acquire);
     }
 
 private:
-    mutable std::mutex m_;
+    mutable std::mutex state_m_;
+    mutable std::mutex wait_m_;
     std::condition_variable cv_;
-    std::deque<T> q_;
-    bool closed_{false};
+    oneapi::tbb::concurrent_bounded_queue<T> q_;
+    std::atomic<std::size_t> size_{0};
+    std::atomic_bool closed_{false};
 };
+
+} // namespace vio

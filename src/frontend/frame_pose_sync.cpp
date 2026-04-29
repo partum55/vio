@@ -6,6 +6,8 @@
 #include <iomanip>
 #include <algorithm>
 
+namespace vio {
+
 namespace
 {
     size_t findRightPoseIndex(
@@ -85,7 +87,7 @@ namespace
     }
 }
 
-vio::FrameState buildFrameStateFromImu(
+FrameState buildFrameStateFromImu(
     int frame_id,
     double frame_timestamp,
     const std::vector<Pose>& imu_trajectory
@@ -107,7 +109,7 @@ vio::FrameState buildFrameStateFromImu(
     static int dbg_counter = 0;
     ++dbg_counter;
 
-    vio::FrameState state;
+    FrameState state;
     state.frame_id = frame_id;
     state.timestamp = frame_timestamp;
 
@@ -120,3 +122,5 @@ vio::FrameState buildFrameStateFromImu(
 
     return state;
 }
+
+} // namespace vio

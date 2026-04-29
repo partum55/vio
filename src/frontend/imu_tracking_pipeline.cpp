@@ -1,11 +1,11 @@
 #include "frontend/imu_tracking_pipeline.hpp"
 
-#include "core/dataset_streamer.h"
+#include "io/data_streamer.hpp"
 #include "frontend/frame_pose_sync.hpp"
 #include "io/image_sequence_reader.hpp"
 #include "io/tracked_output_writer.hpp"
 
-#include "imu/imu.hpp"
+#include "imu/imu_processor.hpp"
 #include "tracking/tracking_vis.hpp"
 #include "io/landmark_output_writer.hpp"
 #include "geometry/geometry_backend.hpp"
@@ -24,6 +24,8 @@
 #include <opencv2/opencv.hpp>
 
 #include <iostream>
+
+namespace vio {
 
 namespace
 {
@@ -61,7 +63,7 @@ namespace
     }
 
     void drainStreamedImuSamples(
-        ThreadSafeQueue<ImuSample>& queue,
+        DatasetStreamer::ImuQueue& queue,
         std::optional<ImuSample>& lookahead,
         double timestamp_s
     )
@@ -75,7 +77,10 @@ namespace
         }
 
         while (true) {
-            auto sample = queue.try_deque();
+            DatasetStreamer::ImuQueueItem sample;
+            if (!queue.try_pop(sample)) {
+                break;
+            }
             if (!sample) {
                 break;
             }
@@ -134,28 +139,28 @@ void ImuTrackingPipeline::setTrackingParams(
     float eps
 )
 {
-    VisualFrontendParams params;
+    frontend_params_.tracker.winSize = win_size;
+    frontend_params_.tracker.maxLevel = max_level;
+    frontend_params_.tracker.maxIters = max_iters;
+    frontend_params_.tracker.eps = eps;
 
-    params.tracker.winSize = win_size;
-    params.tracker.maxLevel = max_level;
-    params.tracker.maxIters = max_iters;
-    params.tracker.eps = eps;
+    frontend_params_.initialFeatures = 100;
+    frontend_params_.minTrackedFeatures = 50;
 
-    params.initialFeatures = 100;
-    params.minTrackedFeatures = 50;
+    frontend_params_.refresh.minTrackedFeatures = 50;
+    frontend_params_.refresh.targetFeatures = 100;
+    frontend_params_.refresh.suppressionRadius = 10.0f;
+    frontend_params_.refresh.qualityLevel = 0.01;
+    frontend_params_.refresh.minDistance = 10.0;
 
-    params.refresh.minTrackedFeatures = 50;
-    params.refresh.targetFeatures = 100;
-    params.refresh.suppressionRadius = 10.0f;
-    params.refresh.qualityLevel = 0.01;
-    params.refresh.minDistance = 10.0;
-
-    frontend_.setParams(params);
+    frontend_.setParams(frontend_params_);
 }
 
 void ImuTrackingPipeline::setRefreshParams(const FeatureRefreshParams& params)
 {
-    (void)params;
+    frontend_params_.refresh = params;
+    frontend_params_.minTrackedFeatures = params.minTrackedFeatures;
+    frontend_.setParams(frontend_params_);
 }
 
 const std::vector<vio::TrackedFrame>& ImuTrackingPipeline::sequence() const
@@ -302,8 +307,11 @@ bool ImuTrackingPipeline::runTrackingAndSync()
         return false;
     }
 
-	vio::GeometryBackend geometry(camera_intrinsics_);
-	vio::VioPipeline vio_pipeline(geometry);
+    GeometryBackendParams geometry_params;
+    geometry_params.triangulation = triangulation_params_;
+
+	GeometryBackend geometry(camera_intrinsics_, geometry_params);
+	VioPipeline vio_pipeline(geometry);
 
     vio::Dataset streaming_dataset = buildStreamingDataset(
         image_paths_,
@@ -316,15 +324,17 @@ bool ImuTrackingPipeline::runTrackingAndSync()
     streamer.start();
     std::optional<ImuSample> imu_lookahead;
 
-    auto first_cf = streamer.imgQueue().deque();
-    if (!first_cf || first_cf->frame_index != start_idx) {
+    DatasetStreamer::CameraQueueItem first_cf_item;
+    streamer.imgQueue().pop(first_cf_item);
+    if (!first_cf_item || first_cf_item->frame_index != start_idx) {
         std::cerr << "Failed to read first frame\n";
         streamer.stop();
         return false;
     }
+    CameraFrame first_cf = std::move(*first_cf_item);
 
-    cv::Mat first_frame = std::move(first_cf->image);
-    drainStreamedImuSamples(streamer.imuQueue(), imu_lookahead, first_cf->timestamp_s);
+    cv::Mat first_frame = std::move(first_cf.image);
+    drainStreamedImuSamples(streamer.imuQueue(), imu_lookahead, first_cf.timestamp_s);
     if (first_frame.empty()) {
         std::cerr << "Failed to read first frame\n";
         streamer.stop();
@@ -342,8 +352,8 @@ bool ImuTrackingPipeline::runTrackingAndSync()
 
     // === INIT PIVOT ===
     vio::FrameState first_state = buildFrameStateFromImu(
-        static_cast<int>(first_cf->frame_index),
-        first_cf->timestamp_s,
+        static_cast<int>(first_cf.frame_index),
+        first_cf.timestamp_s,
         imu_trajectory_
     );
 
@@ -352,15 +362,15 @@ bool ImuTrackingPipeline::runTrackingAndSync()
           << "\n";
 
     frontend_.setPivot(
-        static_cast<int>(first_cf->frame_index),
-        first_cf->timestamp_s,
+        static_cast<int>(first_cf.frame_index),
+        first_cf.timestamp_s,
         first_frame,
         first_state
     );
 
     auto first_output = frontend_.track(
-        static_cast<int>(first_cf->frame_index),
-        first_cf->timestamp_s,
+        static_cast<int>(first_cf.frame_index),
+        first_cf.timestamp_s,
         first_frame,
         first_state
     );
@@ -369,10 +379,16 @@ bool ImuTrackingPipeline::runTrackingAndSync()
     writer.write(drawTrackingVisualization(first_frame, first_output.tracks));
 
     // === MAIN LOOP ===
-    while (auto cf = streamer.imgQueue().deque()) {
-        cv::Mat frame = std::move(cf->image);
-        const int frame_id = static_cast<int>(cf->frame_index);
-        const double timestamp = cf->timestamp_s;
+    while (true) {
+        DatasetStreamer::CameraQueueItem cf_item;
+        streamer.imgQueue().pop(cf_item);
+        if (!cf_item) {
+            break;
+        }
+        CameraFrame cf = std::move(*cf_item);
+        cv::Mat frame = std::move(cf.image);
+        const int frame_id = static_cast<int>(cf.frame_index);
+        const double timestamp = cf.timestamp_s;
         drainStreamedImuSamples(streamer.imuQueue(), imu_lookahead, timestamp);
 
         vio::FrameState state = buildFrameStateFromImu(
@@ -457,3 +473,5 @@ bool ImuTrackingPipeline::run()
 
     return true;
 }
+
+} // namespace vio

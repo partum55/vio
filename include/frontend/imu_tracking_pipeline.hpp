@@ -1,7 +1,7 @@
 #pragma once
 
-#include "core/tracked_frame.hpp"
-#include "imu/imu.hpp"
+#include "core/types.hpp"
+#include "imu/imu_processor.hpp"
 #include "tracking/feature_refresh.hpp"
 #include "frontend/visual_frontend.hpp"
 #include "geometry/camera_model.hpp"
@@ -12,6 +12,8 @@
 #include <Eigen/Dense>
 #include <string>
 #include <vector>
+
+namespace vio {
 
 class ImuTrackingPipeline {
 public:
@@ -71,5 +73,8 @@ private:
     TriangulationParams triangulation_params_;
     RigidTransform T_bs_;
 
+    VisualFrontendParams frontend_params_;
     VisualFrontend frontend_;
 };
+
+} // namespace vio

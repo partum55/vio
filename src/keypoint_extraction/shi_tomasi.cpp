@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cmath>
 
-using namespace std;
+namespace vio {
 
 CustomShiTomasiDetector::CustomShiTomasiDetector(
     ABCThreadPool& pool,
@@ -99,7 +99,7 @@ cv::Mat CustomShiTomasiDetector::shiTomasiScoreImage(
     const int tensorPasses = std::max(1, p.blockSize / 2);
     for (int i = 0; i < tensorPasses; ++i)
     {
-        gaussianBlurCustomBanded(blur_, blur_tmp_, pool_, effective_tasks, 64);
+        gaussianBlurCustomBanded(Ixx_, tensor_tmp_, pool_, effective_tasks, 64);
         std::swap(Ixx_, tensor_tmp_);
 
         gaussianBlurCustomBanded(Iyy_, tensor_tmp_, pool_, effective_tasks, 64 );
@@ -472,3 +472,5 @@ cv::Mat drawKeypointsOnImage(
 
     return vis;
 }
+
+} // namespace vio

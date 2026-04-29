@@ -7,6 +7,8 @@
 #include <fstream>
 #include <sstream>
 
+namespace vio {
+
 std::vector<std::string> loadImagePaths(
     const std::string& directory,
     const std::string& extension
@@ -90,3 +92,5 @@ std::vector<double> loadImageTimestampsFromFile(const std::string& path)
 
     return timestamps;
 }
+
+} // namespace vio

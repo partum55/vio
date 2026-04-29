@@ -1,5 +1,7 @@
 #include "tracking/tracking_vis.hpp"
 
+namespace vio {
+
 float pointDistance(const cv::Point2f& a, const cv::Point2f& b)
 {
     const float dx = a.x - b.x;
@@ -73,3 +75,5 @@ cv::Mat drawTrackingVisualization(
 
     return vis;
 }
+
+} // namespace vio

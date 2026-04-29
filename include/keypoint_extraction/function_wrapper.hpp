@@ -2,6 +2,8 @@
 #include <type_traits>
 #include <utility>
 
+namespace vio {
+
 //based on C++ Concurrency in Action, Ch. 9.1 by Williams
 class FunctionWrapper final {
     struct ImplBase {
@@ -37,3 +39,5 @@ public:
     FunctionWrapper(const FunctionWrapper&) = delete;
     FunctionWrapper& operator=(const FunctionWrapper&) = delete;
 };
+
+} // namespace vio

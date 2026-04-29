@@ -7,6 +7,8 @@
 #include <immintrin.h>
 #endif
 
+namespace vio {
+
 cv::Mat derivativeXCentral(
     const cv::Mat& image,
     ABCThreadPool& pool,
@@ -166,3 +168,5 @@ void centralDifferenceXY(
             }
         });
 }
+
+} // namespace vio

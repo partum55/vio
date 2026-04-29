@@ -10,6 +10,8 @@
 #include <iostream>
 #include <algorithm>
 
+namespace vio {
+
 namespace
 {
     constexpr int kMinFrameGap = 1;
@@ -413,3 +415,5 @@ std::vector<vio::Landmark> triangulateLandmarks(
 
     return landmarks;
 }
+
+} // namespace vio

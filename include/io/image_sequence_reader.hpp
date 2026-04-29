@@ -2,6 +2,8 @@
 #include <string>
 #include <vector>
 
+namespace vio {
+
 std::vector<std::string> loadImagePaths(
     const std::string& directory,
     const std::string& extension
@@ -14,3 +16,5 @@ std::vector<double> loadImageTimestampsFromFilenames(
 std::vector<double> loadImageTimestampsFromFile(
     const std::string& path
 );
+
+} // namespace vio
