@@ -1,8 +1,8 @@
 #include "frontend/vision_compute_backend.hpp"
 
-#include "keypoints/gaussian_blur.hpp"
-#include "keypoints/sobel.hpp"
-#include "keypoints/tpool_default.hpp"
+#include "keypoint_extraction/gaussian_blur.hpp"
+#include "keypoint_extraction/sobel.hpp"
+#include "keypoint_extraction/tpool_default.hpp"
 #include "tracking/lk_tracker.hpp"
 
 #include <algorithm>
@@ -14,12 +14,9 @@
 #include <thread>
 #include <utility>
 
-#if defined(VIO_HAVE_OPENCL)
-#define CL_TARGET_OPENCL_VERSION 120
+#ifdef VIO_HAVE_OPENCL
 #include <CL/cl.h>
 #endif
-
-namespace {
 
 std::string gpuModeFromEnv()
 {
@@ -56,12 +53,12 @@ public:
 
     void gaussianBlur(const cv::Mat& src, cv::Mat& dst) const override
     {
-        dst = vio::gaussianBlurCustom(src, pool_, num_threads_);
+        dst = gaussianBlurCustomFloat(src);
     }
 
     void sobelGradients(const cv::Mat& src, cv::Mat& gx, cv::Mat& gy) const override
     {
-        vio::centralDifferenceXY(src, gx, gy, pool_, num_threads_);
+        computeGradients(src, gx, gy);
     }
 
     void trackPyramidalLK(
@@ -121,7 +118,7 @@ public:
 private:
     std::string name_;
     int num_threads_;
-    mutable vio::ThreadPool pool_;
+    mutable ThreadPool pool_;
 };
 
 #if defined(VIO_HAVE_OPENCL)
@@ -954,8 +951,6 @@ private:
 };
 
 #endif
-
-} // namespace
 
 std::shared_ptr<VisionComputeBackend> VisionComputeBackend::createAuto()
 {

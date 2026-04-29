@@ -7,9 +7,9 @@ int main()
 {
     ImuTrackingPipeline pipeline;
 
-    pipeline.setImuCsvPath("data/imu0/data.csv");
-    pipeline.setImagesDir("data/cam0/undistorted_alpha0/");
-    pipeline.setFrameTimestampsPath("data/frame_timestamps.txt");
+    pipeline.setImuCsvPath("../data/imu0/data.csv");
+    pipeline.setImagesDir("../data/cam0/undistorted_alpha0/");
+    pipeline.setFrameTimestampsPath("../data/frame_timestamps.txt");
 
     CameraIntrinsics intrinsics;
     intrinsics.fx = 356.3485;

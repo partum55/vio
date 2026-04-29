@@ -1,5 +1,5 @@
 #include "io/landmark_output_writer.hpp"
-#include "triangulation/landmark.hpp"
+#include "geometry/landmark.hpp"
 
 #include <fstream>
 #include <iomanip>

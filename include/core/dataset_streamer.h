@@ -2,7 +2,7 @@
 
 #include "core/dataset.h"
 #include "imu/imu.hpp"
-#include "keypoints/thread_safe_queue.hpp"
+#include "keypoint_extraction/thread_safe_queue.hpp"
 
 #include <opencv2/core.hpp>
 

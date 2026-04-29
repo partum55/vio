@@ -1,7 +1,6 @@
 #pragma once
 
-#include "triangulation/landmark.hpp"
-
+#include "geometry/landmark.hpp"
 #include <string>
 #include <vector>
 

@@ -1,8 +1,7 @@
 #pragma once
 
 #include "core/tracked_frame.hpp"
-#include "triangulation/camera_model.hpp"
-
+#include "geometry/camera_model.hpp"
 #include <Eigen/Dense>
 #include <opencv2/core.hpp>
 

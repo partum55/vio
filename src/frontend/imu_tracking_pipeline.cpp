@@ -6,14 +6,11 @@
 #include "io/tracked_output_writer.hpp"
 
 #include "imu/imu.hpp"
-#include "tracking/lk_tracker.hpp"
 #include "tracking/tracking_vis.hpp"
-#include "tracking/feature_refresh.hpp"
 #include "io/landmark_output_writer.hpp"
-#include "triangulation/extrinsics.hpp"
-#include "core/projection.hpp"
-#include "keypoint_extraction/shi_tomasi.hpp"
-#include "keypoint_extraction/tpool_default.hpp"
+#include "geometry/geometry_backend.hpp"
+#include "pipeline/vio_pipeline.hpp"
+#include "geometry/extrinsics.hpp"   // якщо RigidTransform тепер тут
 
 #include <algorithm>
 #include <cmath>
@@ -30,36 +27,6 @@
 
 namespace
 {
-    std::vector<Track> buildTracksFromFirstFrameSequence(
-        const std::vector<vio::TrackedFrame>& sequence
-    )
-    {
-        std::vector<Track> tracks;
-        if (sequence.empty()) {
-            return tracks;
-        }
-
-        const auto& first = sequence.front();
-        tracks.reserve(first.observations.size());
-
-        for (const auto& obs : first.observations) {
-            if (!obs.valid) {
-                continue;
-            }
-
-            Track t;
-            t.id = obs.track_id;
-            t.pt = cv::Point2f(
-                static_cast<float>(obs.uv.x()),
-                static_cast<float>(obs.uv.y())
-            );
-            t.history.push_back(t.pt);
-            tracks.push_back(t);
-        }
-
-        return tracks;
-    }
-
     std::int64_t timestampToNs(double timestamp_s)
     {
         return static_cast<std::int64_t>(std::llround(timestamp_s * 1e9));
@@ -94,7 +61,7 @@ namespace
     }
 
     void drainStreamedImuSamples(
-        vio::ThreadSafeQueue<ImuSample>& queue,
+        ThreadSafeQueue<ImuSample>& queue,
         std::optional<ImuSample>& lookahead,
         double timestamp_s
     )
@@ -288,38 +255,6 @@ bool ImuTrackingPipeline::runImu()
     return true;
 }
 
-void ImuTrackingPipeline::initializeTracks(const cv::Mat& first_gray)
-{
-    if (first_gray.empty()) {
-        throw std::runtime_error("initializeTracks: empty image");
-    }
-
-    if (first_gray.type() != CV_8UC1) {
-        throw std::runtime_error("initializeTracks: expected CV_8UC1 grayscale image");
-    }
-
-    const unsigned int numThreads =
-        std::max(1u, std::thread::hardware_concurrency());
-
-    ThreadPool pool(static_cast<int>(numThreads));
-    CustomShiTomasiDetector detector(pool, static_cast<int>(numThreads));
-
-    ShiTomasiParams detectorParams;
-    detectorParams.maxCorners = 100;
-    detectorParams.qualityLevel = 0.01;
-    detectorParams.minDistance = 10.0;
-    detectorParams.blockSize = 5;
-    detectorParams.gaussianSigma = 1.0;
-    detectorParams.nmsRadius = 2;
-
-    std::vector<cv::Point2f> initial_pts =
-        detector.detect(first_gray, detectorParams);
-
-    if (initial_pts.empty()) {
-        throw std::runtime_error("initializeTracks: no initial features found");
-    }
-}
-
 void ImuTrackingPipeline::setTriangulationParams(const TriangulationParams& params)
 {
     triangulation_params_ = params;
@@ -333,62 +268,6 @@ const std::vector<vio::Landmark>& ImuTrackingPipeline::landmarks() const
 void ImuTrackingPipeline::setOutputLandmarksCsv(const std::string& path)
 {
     output_landmarks_csv_ = path;
-}
-
-void ImuTrackingPipeline::appendFrame(
-    int frame_id,
-    double timestamp,
-    const std::vector<Track>& tracks
-)
-{
-    vio::TrackedFrame frame;
-
-    frame.state = buildFrameStateFromImu(frame_id, timestamp, imu_trajectory_);
-
-    const Eigen::Matrix3d R_wb = frame.state.q_wc.toRotationMatrix();
-    const Eigen::Vector3d t_wb = frame.state.t_wc;
-
-    frame.state.q_wc = Eigen::Quaterniond(R_wb);
-    frame.state.q_wc.normalize();
-    frame.state.t_wc = t_wb;
-
-    frame.observations.reserve(tracks.size());
-
-    for (const auto& t : tracks)
-    {
-        vio::Observation obs;
-        obs.frame_id = frame_id;
-        obs.track_id = t.id;
-        obs.uv = Eigen::Vector2d(t.pt.x, t.pt.y);
-        obs.valid = true;
-        frame.observations.push_back(obs);
-    }
-
-    sequence_.push_back(std::move(frame));
-}
-
-bool ImuTrackingPipeline::runTriangulation()
-{
-    if (sequence_.empty())
-    {
-        std::cerr << "Sequence is empty, cannot triangulate landmarks\n";
-        return false;
-    }
-
-    if (!camera_intrinsics_.isValid())
-    {
-        std::cerr << "Camera intrinsics are invalid\n";
-        return false;
-    }
-
-    landmarks_ = triangulateLandmarks(
-        sequence_,
-        camera_intrinsics_,
-        triangulation_params_
-    );
-
-    std::cout << "Triangulated landmarks: " << landmarks_.size() << "\n";
-    return true;
 }
 
 bool ImuTrackingPipeline::runTrackingAndSync()
@@ -422,6 +301,9 @@ bool ImuTrackingPipeline::runTrackingAndSync()
         std::cerr << "No overlapping time range\n";
         return false;
     }
+
+	vio::GeometryBackend geometry(camera_intrinsics_);
+	vio::VioPipeline vio_pipeline(geometry);
 
     vio::Dataset streaming_dataset = buildStreamingDataset(
         image_paths_,
@@ -479,7 +361,7 @@ bool ImuTrackingPipeline::runTrackingAndSync()
         first_state
     );
 
-    sequence_.push_back(first_output.frame);
+	vio_pipeline.processFrame(first_output.frame);
     writer.write(drawTrackingVisualization(first_frame, first_output.tracks));
 
     // === MAIN LOOP ===
@@ -502,7 +384,7 @@ bool ImuTrackingPipeline::runTrackingAndSync()
             state
         );
 
-        sequence_.push_back(output.frame);
+		vio_pipeline.processFrame(output.frame);
         writer.write(drawTrackingVisualization(frame, output.tracks, 15));
 
         // === RESET PIVOT ===
@@ -516,234 +398,10 @@ bool ImuTrackingPipeline::runTrackingAndSync()
         }
     }
 
+	sequence_ = vio_pipeline.frames();
+	landmarks_ = vio_pipeline.landmarks().getValidLandmarks();
     writer.release();
-    return true;
-}
-
-bool ImuTrackingPipeline::runTrackingWithImuPrior()
-{
-    if (image_paths_.empty() || frame_timestamps_.empty()) {
-        std::cerr << "Images or timestamps are empty\n";
-        return false;
-    }
-
-    if (imu_trajectory_.empty()) {
-        std::cerr << "IMU trajectory is empty\n";
-        return false;
-    }
-
-    if (landmarks_.empty()) {
-        std::cerr << "Landmarks are empty, cannot run IMU-prior tracking\n";
-        return false;
-    }
-
-    if (sequence_.empty()) {
-        std::cerr << "Sequence is empty, cannot run IMU-prior tracking\n";
-        return false;
-    }
-
-    std::unordered_map<int, Eigen::Vector3d> landmarks_by_track;
-    for (const auto& lm : landmarks_) {
-        if (lm.valid) {
-            landmarks_by_track[lm.track_id] = lm.p_w;
-        }
-    }
-
-    const double t_min = imu_trajectory_.front().t;
-    const double t_max = imu_trajectory_.back().t;
-
-    size_t start_idx = 0;
-    while (start_idx < frame_timestamps_.size() &&
-           frame_timestamps_[start_idx] < t_min) {
-        ++start_idx;
-    }
-
-    size_t end_idx = frame_timestamps_.size();
-    while (end_idx > start_idx &&
-           frame_timestamps_[end_idx - 1] > t_max) {
-        --end_idx;
-    }
-
-    if (start_idx >= end_idx) {
-        std::cerr << "No overlapping time range between frames and IMU\n";
-        return false;
-    }
-
-    const size_t max_frames = 220;
-    if (max_frames > 0) {
-        end_idx = std::min(end_idx, start_idx + max_frames);
-    }
-
-    vio::Dataset streaming_dataset = buildStreamingDataset(
-        image_paths_,
-        frame_timestamps_,
-        imu_samples_,
-        start_idx,
-        end_idx
-    );
-    vio::DatasetStreamer streamer(streaming_dataset);
-    streamer.start();
-    std::optional<ImuSample> imu_lookahead;
-
-    auto first_cf = streamer.imgQueue().deque();
-    if (!first_cf || first_cf->frame_index != start_idx) {
-        std::cerr << "Failed to read first image: " << image_paths_[start_idx] << "\n";
-        streamer.stop();
-        return false;
-    }
-
-    cv::Mat first_frame = std::move(first_cf->image);
-    drainStreamedImuSamples(streamer.imuQueue(), imu_lookahead, first_cf->timestamp_s);
-    if (first_frame.empty()) {
-        std::cerr << "Failed to read first image: " << image_paths_[start_idx] << "\n";
-        streamer.stop();
-        return false;
-    }
-
-    cv::VideoWriter writer(
-        "imu_prior_" + output_video_path_,
-        cv::VideoWriter::fourcc('m', 'p', '4', 'v'),
-        20.0,
-        cv::Size(first_frame.cols, first_frame.rows)
-    );
-
-    if (!writer.isOpened()) {
-        std::cerr << "Failed to open IMU-prior output video\n";
-        streamer.stop();
-        return false;
-    }
-
-    std::vector<Track> tracks = buildTracksFromFirstFrameSequence(sequence_);
-    if (tracks.empty()) {
-        std::cerr << "Failed to initialize IMU-prior tracks from sequence\n";
-        streamer.stop();
-        return false;
-    }
-
-    vio::FrameState first_state = buildFrameStateFromImu(
-        static_cast<int>(first_cf->frame_index),
-        first_cf->timestamp_s,
-        imu_trajectory_
-    );
-
-    frontend_.setPivotWithTracks(
-        static_cast<int>(first_cf->frame_index),
-        first_cf->timestamp_s,
-        first_frame,
-        first_state,
-        tracks
-    );
-
-    std::vector<vio::TrackedFrame> imu_prior_sequence;
-
-    VisualFrontendOutput first_output;
-    first_output.frame.state = first_state;
-    first_output.tracks = frontend_.activeTracks();
-
-    for (const auto& t : frontend_.activeTracks()) {
-        vio::Observation obs;
-        obs.frame_id = first_state.frame_id;
-        obs.track_id = t.id;
-        obs.uv = Eigen::Vector2d(t.pt.x, t.pt.y);
-        obs.valid = true;
-        first_output.frame.observations.push_back(obs);
-    }
-
-    imu_prior_sequence.push_back(first_output.frame);
-    writer.write(drawTrackingVisualization(first_frame, frontend_.activeTracks()));
-
-    while (auto cf = streamer.imgQueue().deque()) {
-        cv::Mat curr_frame = std::move(cf->image);
-        const int frame_id = static_cast<int>(cf->frame_index);
-        const double timestamp = cf->timestamp_s;
-        drainStreamedImuSamples(streamer.imuQueue(), imu_lookahead, timestamp);
-
-        vio::FrameState curr_state = buildFrameStateFromImu(
-            frame_id,
-            timestamp,
-            imu_trajectory_
-        );
-
-        std::vector<cv::Point2f> initial_guess;
-        initial_guess.reserve(frontend_.activeTracks().size());
-
-        for (const auto& t : frontend_.activeTracks()) {
-            auto it = landmarks_by_track.find(t.id);
-
-            if (it == landmarks_by_track.end()) {
-                initial_guess.push_back(t.pt);
-                continue;
-            }
-
-            cv::Point2f uv_pred;
-            const bool ok = projectLandmarkToFrame(
-                curr_state,
-                camera_intrinsics_,
-                it->second,
-                uv_pred
-            );
-
-            if (!ok) {
-                initial_guess.push_back(t.pt);
-                continue;
-            }
-
-            const bool inside_image =
-                uv_pred.x >= 0.0f &&
-                uv_pred.x < static_cast<float>(curr_frame.cols) &&
-                uv_pred.y >= 0.0f &&
-                uv_pred.y < static_cast<float>(curr_frame.rows);
-
-            const bool reasonable_jump =
-                cv::norm(uv_pred - t.pt) < 10.0f;
-
-            if (inside_image && reasonable_jump) {
-                initial_guess.push_back(uv_pred);
-            } else {
-                initial_guess.push_back(t.pt);
-            }
-        }
-
-        VisualFrontendOutput output;
-
-        try {
-            output = frontend_.trackWithGuess(
-                frame_id,
-                timestamp,
-                curr_frame,
-                curr_state,
-                initial_guess
-            );
-        } catch (const std::exception& e) {
-            std::cerr << "IMU-prior frontend tracking failed on frame "
-                      << frame_id << ": " << e.what() << "\n";
-            streamer.stop();
-            return false;
-        }
-
-        imu_prior_sequence.push_back(output.frame);
-
-        writer.write(drawTrackingVisualization(curr_frame, output.tracks, 15));
-
-        if (output.tracks.empty()) {
-            std::cerr << "No tracks left in IMU-prior tracking on frame "
-                      << frame_id << "\n";
-            break;
-        }
-
-        if (!output.enough_tracks) {
-            frontend_.setPivot(
-                frame_id,
-                timestamp,
-                curr_frame,
-                curr_state
-            );
-        }
-    }
-
-    writer.release();
-
-    sequence_ = std::move(imu_prior_sequence);
+	streamer.stop();
     return true;
 }
 
@@ -767,18 +425,6 @@ bool ImuTrackingPipeline::run()
 
     std::cout << "STEP 3: runTrackingAndSync\n";
     if (!runTrackingAndSync())
-    {
-        return false;
-    }
-
-    std::cout << "STEP 4: runTriangulation\n";
-    if (!runTriangulation())
-    {
-        return false;
-    }
-
-    std::cout << "STEP 5: runTrackingWithImuPrior\n";
-    if (!runTrackingWithImuPrior())
     {
         return false;
     }

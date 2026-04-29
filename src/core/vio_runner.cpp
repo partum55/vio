@@ -4,7 +4,8 @@
 #include "core/dataset_streamer.h"
 #include "imu/imu.hpp"
 #include "frontend/vision_compute_backend.hpp"
-#include "keypoints/shi_tomasi.hpp"
+#include "keypoint_extraction/shi_tomasi.hpp"
+#include "keypoint_extraction/tpool_default.hpp"
 #include "tracking/lk_tracker.hpp"
 
 #include <opencv2/imgcodecs.hpp>
@@ -517,7 +518,10 @@ RunResult runVisualInertialOdometry(const Dataset& dataset,
     }
 
     auto compute_backend = VisionComputeBackend::createAuto();
-    CustomShiTomasiDetector detector(*compute_backend);
+    const int num_threads = static_cast<int>(std::max(1u, std::thread::hardware_concurrency()));
+
+	ThreadPool pool(num_threads);
+	CustomShiTomasiDetector detector(pool, num_threads);
 
     ShiTomasiParams detector_params;
     detector_params.maxCorners = 600;
@@ -710,7 +714,10 @@ RunResult runVisualInertialOdometry(DatasetStreamer& streamer,
     }
 
     auto compute_backend = VisionComputeBackend::createAuto();
-    CustomShiTomasiDetector detector(*compute_backend);
+    const int num_threads = static_cast<int>(std::max(1u, std::thread::hardware_concurrency()));
+
+	ThreadPool pool(num_threads);
+	CustomShiTomasiDetector detector(pool, num_threads);
 
     ShiTomasiParams detector_params;
     detector_params.maxCorners    = 600;
