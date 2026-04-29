@@ -411,23 +411,5 @@ std::vector<vio::Landmark> triangulateLandmarks(
         ++accepted;
     }
 
-    if (!observations_by_track.empty()) {
-        std::cout << "track len min/avg/max: "
-                  << min_track_len << " / "
-                  << (sum_track_len / static_cast<double>(observations_by_track.size())) << " / "
-                  << max_track_len << "\n";
-    } else {
-        std::cout << "track len min/avg/max: 0 / 0 / 0\n";
-    }
-
-    if (baseline_count > 0) {
-        std::cout << "selected baseline min/avg/max: "
-                  << min_best_baseline << " / "
-                  << (sum_best_baseline / static_cast<double>(baseline_count)) << " / "
-                  << max_best_baseline << "\n";
-    } else {
-        std::cout << "selected baseline min/avg/max: 0 / 0 / 0\n";
-    }
-
     return landmarks;
 }

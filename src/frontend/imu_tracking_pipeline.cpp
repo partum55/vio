@@ -347,6 +347,10 @@ bool ImuTrackingPipeline::runTrackingAndSync()
         imu_trajectory_
     );
 
+	std::cout << "first frame " << first_state.frame_id
+          << " t_wc = " << first_state.t_wc.transpose()
+          << "\n";
+
     frontend_.setPivot(
         static_cast<int>(first_cf->frame_index),
         first_cf->timestamp_s,
@@ -376,6 +380,10 @@ bool ImuTrackingPipeline::runTrackingAndSync()
             timestamp,
             imu_trajectory_
         );
+
+		std::cout << "frame " << frame_id
+          << " t_wc = " << state.t_wc.transpose()
+          << "\n";
 
         auto output = frontend_.track(
             frame_id,

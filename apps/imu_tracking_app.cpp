@@ -19,10 +19,10 @@ int main()
 
     pipeline.setCameraIntrinsics(intrinsics);
 
-    pipeline.setOutputPosesCsv("results/poses.csv");
-    pipeline.setOutputObservationsCsv("results/observations.csv");
-    pipeline.setOutputVideoPath("results/imu_tracking_visualization.mp4");
-    pipeline.setOutputLandmarksCsv("results/landmarks.csv");
+    pipeline.setOutputPosesCsv("../results/poses.csv");
+	pipeline.setOutputObservationsCsv("../results/observations.csv");
+	pipeline.setOutputVideoPath("../results/imu_tracking_visualization.mp4");
+	pipeline.setOutputLandmarksCsv("../results/landmarks.csv");
 
     pipeline.setGravity(Eigen::Vector3d(0.0, 0.0, 9.81));
     pipeline.setTrackingParams(9, 3, 10, 1e-3f);
