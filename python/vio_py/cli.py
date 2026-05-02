@@ -191,7 +191,8 @@ def run_server(args: argparse.Namespace) -> int:
 
                     image_path = Path(message.get("image_path", ""))
                     if image_path != last_image_path and image_path.is_file():
-                        rr.log("camera/first_view", rr.EncodedImage(contents=image_path.read_bytes(), media_type="image/jpeg"))
+                        _mt = "image/png" if image_path.suffix.lower() == ".png" else "image/jpeg"
+                        rr.log("camera/first_view", rr.EncodedImage(contents=image_path.read_bytes(), media_type=_mt))
                         last_image_path = image_path
                     continue
 
@@ -277,7 +278,8 @@ def run_server(args: argparse.Namespace) -> int:
 
                     image_path = Path(message.get("image_path", ""))
                     if image_path != last_image_path and image_path.is_file():
-                        rr.log("camera/first_view", rr.EncodedImage(contents=image_path.read_bytes(), media_type="image/jpeg"))
+                        _mt = "image/png" if image_path.suffix.lower() == ".png" else "image/jpeg"
+                        rr.log("camera/first_view", rr.EncodedImage(contents=image_path.read_bytes(), media_type=_mt))
                         last_image_path = image_path
                     continue
 
