@@ -37,7 +37,7 @@ struct CameraIntrinsics {
     int width = 0;
     int height = 0;
 
-    Eigen::Matrix3d matrix() const {
+    [[nodiscard]] Eigen::Matrix3d matrix() const {
         Eigen::Matrix3d K = Eigen::Matrix3d::Identity();
         K(0, 0) = fx;
         K(1, 1) = fy;
@@ -46,7 +46,7 @@ struct CameraIntrinsics {
         return K;
     }
 
-    bool isValid() const {
+    [[nodiscard]] bool isValid() const {
         return fx > 0.0 && fy > 0.0;
     }
 };

@@ -268,6 +268,12 @@ void VioPipeline::processFrame(const TrackedFrame& input_frame) {
         return;
     }
 
+    const bool has_global_landmarks = !landmark_map_.empty();
+    const bool pnp_refined =
+        has_global_landmarks &&
+        pnpCorrespondenceCount(current) >= params_.min_landmarks_for_pnp &&
+        refinePoseWithPnP(current);
+
     if (!baselineReady(current)) {
         status_ = landmark_map_.empty()
             ? VioStatus::TrackingFromPivot
@@ -312,8 +318,7 @@ void VioPipeline::processFrame(const TrackedFrame& input_frame) {
     // 3. accept PnP only if RANSAC is strong;
     // 4. triangulate fresh tracks from old pivot + accepted current pose;
     // 5. make current the new pivot.
-    if (pnpCorrespondenceCount(current) >= params_.min_landmarks_for_pnp &&
-        refinePoseWithPnP(current)) {
+    if (pnp_refined) {
         (void)triangulateFromPivot(current, 0);
         setPivot(current, Stage::TrackWithLandmarks);
         status_ = VioStatus::TrackingWithMap;
@@ -454,10 +459,24 @@ VioRunResult VioPipeline::runConfigured(const VioRunConfig& config) {
 
             pipeline.processFrame(output.frame);
             if (config.frame_logger) {
+                TrackedFrame logged_frame = output.frame;
+                if (pipeline.hasCurrentPose()) {
+                    logged_frame.state = pipeline.currentPose();
+                }
+                int map_correspondences = 0;
+                for (const Observation& obs : logged_frame.observations) {
+                    if (obs.valid && pipeline.landmarks().hasTrack(obs.track_id)) {
+                        ++map_correspondences;
+                    }
+                }
+                const bool pose_reliable =
+                    map_correspondences >= VioPipelineParams{}.min_landmarks_for_pnp;
                 config.frame_logger(
-                    output.frame,
+                    logged_frame,
+                    output.tracks,
                     pipeline.landmarks().getValidLandmarks(),
                     pipeline.status(),
+                    pose_reliable,
                     camera.image_path
                 );
             }
@@ -704,7 +723,7 @@ bool VioPipeline::refinePoseWithPnP(TrackedFrame& current) {
     }
 
     const double jump = (pnp_result.pose.t_wc - current.state.t_wc).norm();
-    if (!std::isfinite(jump) || jump > params_.max_pose_baseline) {
+    if (!std::isfinite(jump)) {
         return false;
     }
 

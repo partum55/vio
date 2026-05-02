@@ -42,6 +42,14 @@ cv::Mat VisualFrontend::toGray(const cv::Mat& frame_bgr_or_gray) const
     return gray;
 }
 
+void VisualFrontend::updatePreviousFrame(const cv::Mat& gray)
+{
+    if (gray.empty()) {
+        throw std::runtime_error("VisualFrontend::updatePreviousFrame: empty frame");
+    }
+    previous_gray_ = gray.clone();
+}
+
 std::vector<Track> VisualFrontend::makeTracks(
     const std::vector<cv::Point2f>& points
 ) {
@@ -104,6 +112,7 @@ void VisualFrontend::setPivot(
     }
 
     active_tracks_ = makeTracks(points);
+    updatePreviousFrame(gray);
 
     pivot_.set(
         frame_id,
@@ -126,8 +135,12 @@ VisualFrontendOutput VisualFrontend::track(
 
     cv::Mat curr_gray = toGray(frame_bgr_or_gray);
 
+    if (previous_gray_.empty()) {
+        updatePreviousFrame(pivot_.gray());
+    }
+
     TrackingResult tracked = tracker_.track(
-        pivot_.gray(),
+        previous_gray_,
         curr_gray,
         active_tracks_
     );
@@ -140,6 +153,7 @@ VisualFrontendOutput VisualFrontend::track(
     output.tracks = active_tracks_;
     output.frame = makeTrackedFrame(pose, active_tracks_);
     output.enough_tracks = hasEnoughTracks();
+    updatePreviousFrame(curr_gray);
 
     return output;
 }
@@ -157,8 +171,12 @@ VisualFrontendOutput VisualFrontend::trackWithGuess(
 
     cv::Mat curr_gray = toGray(frame_bgr_or_gray);
 
+    if (previous_gray_.empty()) {
+        updatePreviousFrame(pivot_.gray());
+    }
+
     TrackingResult tracked = tracker_.trackWithGuess(
-        pivot_.gray(),
+        previous_gray_,
         curr_gray,
         active_tracks_,
         initial_guess
@@ -172,6 +190,7 @@ VisualFrontendOutput VisualFrontend::trackWithGuess(
     output.tracks = active_tracks_;
     output.frame = makeTrackedFrame(pose, active_tracks_);
     output.enough_tracks = hasEnoughTracks();
+    updatePreviousFrame(curr_gray);
 
     return output;
 }
@@ -250,6 +269,7 @@ void VisualFrontend::setPivotWithTracks(
     cv::Mat gray = toGray(frame_bgr_or_gray);
 
     active_tracks_ = tracks;
+    updatePreviousFrame(gray);
 
     int max_id = -1;
     for (const auto& t : active_tracks_) {

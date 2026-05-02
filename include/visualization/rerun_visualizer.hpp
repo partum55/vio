@@ -17,7 +17,7 @@ public:
     RerunVisualizer(const RerunVisualizer&) = delete;
     RerunVisualizer& operator=(const RerunVisualizer&) = delete;
 
-    bool connect(const std::string& host = "127.0.0.1", int port = 9876, int retries = 20, int retry_delay_ms = 250);
+    bool connect(const std::string& host = "127.0.0.1", int port = 9877, int retries = 20, int retry_delay_ms = 250);
     bool isConnected() const noexcept;
     void close();
 

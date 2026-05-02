@@ -1,8 +1,23 @@
 #include "frontend/feature_tracker.hpp"
 
+#include <cmath>
 #include <stdexcept>
 
 namespace vio {
+
+namespace {
+
+bool isPointInside(const cv::Point2f& point, const cv::Size& size, int border_margin)
+{
+    return std::isfinite(point.x) &&
+           std::isfinite(point.y) &&
+           point.x >= static_cast<float>(border_margin) &&
+           point.y >= static_cast<float>(border_margin) &&
+           point.x < static_cast<float>(size.width - border_margin) &&
+           point.y < static_cast<float>(size.height - border_margin);
+}
+
+} // namespace
 
 FeatureTracker::FeatureTracker()
     : backend_(VisionComputeBackend::createAuto())
@@ -51,12 +66,41 @@ TrackingResult FeatureTracker::track(
         params_.eps
     );
 
+    std::vector<cv::Point2f> pts_back;
+    std::vector<uchar> back_status;
+    std::vector<float> back_error;
+    backend_->trackPyramidalLK(
+        curr_gray,
+        prev_gray,
+        pts_curr,
+        pts_back,
+        back_status,
+        back_error,
+        params_.winSize,
+        params_.maxLevel,
+        params_.maxIters,
+        params_.eps
+    );
+
     TrackingResult result;
     result.status = status;
     result.error = error;
 
     for (size_t i = 0; i < previous_tracks.size(); ++i) {
         if (!status[i]) {
+            continue;
+        }
+        if (i >= pts_curr.size() || i >= pts_back.size() || i >= back_status.size() || !back_status[i]) {
+            continue;
+        }
+        if (!isPointInside(pts_curr[i], curr_gray.size(), params_.borderMargin)) {
+            continue;
+        }
+        if (i < error.size() && params_.maxError > 0.0f && error[i] > params_.maxError) {
+            continue;
+        }
+        if (params_.maxForwardBackwardError > 0.0f &&
+            cv::norm(pts_back[i] - pts_prev[i]) > params_.maxForwardBackwardError) {
             continue;
         }
 
@@ -113,12 +157,41 @@ TrackingResult FeatureTracker::trackWithGuess(
         params_.eps
     );
 
+    std::vector<cv::Point2f> pts_back;
+    std::vector<uchar> back_status;
+    std::vector<float> back_error;
+    backend_->trackPyramidalLK(
+        curr_gray,
+        prev_gray,
+        pts_curr,
+        pts_back,
+        back_status,
+        back_error,
+        params_.winSize,
+        params_.maxLevel,
+        params_.maxIters,
+        params_.eps
+    );
+
     TrackingResult result;
     result.status = status;
     result.error = error;
 
     for (size_t i = 0; i < previous_tracks.size(); ++i) {
         if (!status[i]) {
+            continue;
+        }
+        if (i >= pts_curr.size() || i >= pts_back.size() || i >= back_status.size() || !back_status[i]) {
+            continue;
+        }
+        if (!isPointInside(pts_curr[i], curr_gray.size(), params_.borderMargin)) {
+            continue;
+        }
+        if (i < error.size() && params_.maxError > 0.0f && error[i] > params_.maxError) {
+            continue;
+        }
+        if (params_.maxForwardBackwardError > 0.0f &&
+            cv::norm(pts_back[i] - pts_prev[i]) > params_.maxForwardBackwardError) {
             continue;
         }
 

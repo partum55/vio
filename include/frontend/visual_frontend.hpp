@@ -76,6 +76,7 @@ public:
 
 private:
     cv::Mat toGray(const cv::Mat& frame_bgr_or_gray) const;
+    void updatePreviousFrame(const cv::Mat& gray);
 
     std::vector<Track> makeTracks(
         const std::vector<cv::Point2f>& points
@@ -96,6 +97,7 @@ private:
     PivotFrame pivot_;
 
     std::vector<Track> active_tracks_;
+    cv::Mat previous_gray_;
     int next_track_id_ = 0;
 };
 

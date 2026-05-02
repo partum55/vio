@@ -48,7 +48,7 @@ endfunction()
 # CANONICAL VIO APP
 # =========================
 add_executable(vio
-        apps/vio_app.cpp
+        main.cpp
 
         # approved frontend + backend
         src/frontend/feature_extractor.cpp
@@ -73,6 +73,7 @@ add_executable(vio
         src/io/data_streamer.cpp
 
         # visualization
+        src/visualization/points_video_renderer.cpp
         src/visualization/rerun_visualizer.cpp
 )
 

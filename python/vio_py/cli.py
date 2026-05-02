@@ -89,14 +89,20 @@ def run_server(args: argparse.Namespace) -> int:
     traj_chunk_id: int = 0
     last_image_path: Path | None = None
 
+    def set_rerun_time(timestamp: float) -> None:
+        if hasattr(rr, "set_time"):
+            rr.set_time("sim_time", timestamp=timestamp)
+        elif hasattr(rr, "set_time_seconds"):
+            rr.set_time_seconds("sim_time", timestamp)
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((args.host, args.port))
         server.listen(1)
-        print(f"Rerun receiver listening on {args.host}:{args.port}")
+        print(f"Rerun receiver listening on {args.host}:{args.port}", flush=True)
 
         conn, addr = server.accept()
-        print(f"Connected from {addr[0]}:{addr[1]}")
+        print(f"Connected from {addr[0]}:{addr[1]}", flush=True)
         with conn, conn.makefile("r", encoding="utf-8") as stream:
             for line in stream:
                 if not line.strip():
@@ -141,10 +147,7 @@ def run_server(args: argparse.Namespace) -> int:
 
                 if msg_type == "sample":
                     timestamp = float(message["timestamp"])
-                    if hasattr(rr, "set_time"):
-                        rr.set_time("sim_time", timestamp=timestamp)
-                    elif hasattr(rr, "set_time_seconds"):
-                        rr.set_time_seconds("sim_time", timestamp)
+                    set_rerun_time(timestamp)
 
                     sample_seq += 1
                     position = [float(v) for v in message["position"]]
@@ -190,6 +193,99 @@ def run_server(args: argparse.Namespace) -> int:
                     if image_path != last_image_path and image_path.is_file():
                         rr.log("camera/first_view", rr.EncodedImage(contents=image_path.read_bytes(), media_type="image/jpeg"))
                         last_image_path = image_path
+                    continue
+
+                if msg_type == "pose":
+                    timestamp = float(message.get("timestamp", 0.0))
+                    set_rerun_time(timestamp)
+
+                    sample_seq += 1
+                    position = [float(v) for v in message["position"]]
+                    quat = [float(v) for v in message["orientation_xyzw"]]
+
+                    traj_buffer.append(position)
+                    if len(traj_buffer) > _TRAJ_CHUNK:
+                        rr.log(
+                            f"world/trajectory/c{traj_chunk_id:06d}",
+                            rr.LineStrips3D([traj_buffer], colors=[[48, 220, 128]]),
+                        )
+                        traj_chunk_id += 1
+                        traj_buffer = [position]
+                    elif sample_seq % _TRAJ_STEP == 0:
+                        rr.log(
+                            "world/trajectory/live",
+                            rr.LineStrips3D([traj_buffer], colors=[[48, 220, 128]]),
+                        )
+
+                    rr.log(
+                        "world/agent",
+                        rr.Points3D([position], colors=[[255, 220, 64]], radii=[0.08 * visual_scale]),
+                    )
+
+                    heading_len = 0.35 * visual_scale
+                    direction_tip = [
+                        position[0] + heading_len * (2.0 * (quat[0] * quat[2] + quat[3] * quat[1])),
+                        position[1] + heading_len * (2.0 * (quat[1] * quat[2] - quat[3] * quat[0])),
+                        position[2] + heading_len * (1.0 - 2.0 * (quat[0] * quat[0] + quat[1] * quat[1])),
+                    ]
+                    rr.log(
+                        "world/agent_heading",
+                        rr.LineStrips3D([[position, direction_tip]], colors=[[255, 220, 64]]),
+                    )
+                    continue
+
+                if msg_type == "trajectory":
+                    positions = message.get("positions", [])
+                    if positions:
+                        rr.log(
+                            "world/trajectory/full",
+                            rr.LineStrips3D([positions], colors=[[48, 220, 128]]),
+                        )
+                    continue
+
+                if msg_type == "landmarks":
+                    positions = [
+                        [float(v) for v in landmark["position"]]
+                        for landmark in message.get("points", [])
+                    ]
+                    if positions:
+                        rr.log(
+                            "world/landmarks",
+                            rr.Points3D(positions, colors=[[80, 180, 255]], radii=[0.025 * visual_scale]),
+                        )
+                    continue
+
+                if msg_type == "tracked_features":
+                    points = [
+                        [float(v) for v in feature["uv"]]
+                        for feature in message.get("features", [])
+                    ]
+                    rr.log(
+                        "stats/tracks",
+                        rr.TextDocument(f"Tracked features: {len(points)}"),
+                    )
+                    if points:
+                        rr.log(
+                            "camera/first_view/features",
+                            rr.Points2D(points, colors=[[40, 255, 80]], radii=[3.0]),
+                        )
+                    continue
+
+                if msg_type == "image":
+                    timestamp = float(message.get("timestamp", 0.0))
+                    set_rerun_time(timestamp)
+
+                    image_path = Path(message.get("image_path", ""))
+                    if image_path != last_image_path and image_path.is_file():
+                        rr.log("camera/first_view", rr.EncodedImage(contents=image_path.read_bytes(), media_type="image/jpeg"))
+                        last_image_path = image_path
+                    continue
+
+                if msg_type == "status":
+                    rr.log(
+                        "world/status",
+                        rr.TextDocument(str(message.get("status", ""))),
+                    )
                     continue
 
                 if msg_type == "done":

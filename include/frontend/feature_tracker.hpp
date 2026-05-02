@@ -14,6 +14,9 @@ struct FeatureTrackerParams {
     int maxLevel = 3;
     int maxIters = 10;
     float eps = 1e-3f;
+    float maxError = 50.0f;
+    float maxForwardBackwardError = 1.5f;
+    int borderMargin = 2;
 };
 
 struct TrackingResult {

@@ -117,9 +117,7 @@ PnPResult PnPSolver::solve(
     const Eigen::Matrix3d R_wc = R_cw.transpose();
     const Eigen::Vector3d t_wc = -R_wc * t_cw;
 
-    const double translation_update = (t_wc - initial_pose.t_wc).norm();
-    if (!std::isfinite(translation_update) ||
-        translation_update > params_.max_translation_update) {
+    if (!t_wc.allFinite()) {
         return result;
     }
 

@@ -69,8 +69,10 @@ namespace vio {
 
         std::function<void(
             const TrackedFrame& frame,
+            const std::vector<Track>& tracks,
             const std::vector<Landmark>& landmarks,
             VioStatus status,
+            bool pose_reliable,
             const std::filesystem::path& image_path)> frame_logger;
     };
 
