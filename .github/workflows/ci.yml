@@ -27,7 +27,7 @@ jobs:
       - name: Install C++ deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y libeigen3-dev libopencv-dev
+          sudo apt-get install -y libeigen3-dev libopencv-dev libtbb-dev
 
       # CMake
       - name: Configure (CMake)
