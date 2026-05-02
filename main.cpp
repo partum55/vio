@@ -205,10 +205,15 @@ int main(int argc, char** argv)
 
         const std::filesystem::path undistorted_images = root / "cam0" / "undistorted_alpha0";
         const std::filesystem::path raw_images = root / "cam0" / "data";
-        config.images_dir =
-            std::filesystem::is_directory(undistorted_images)
-                ? undistorted_images.string()
-                : raw_images.string();
+        if (!std::filesystem::is_directory(undistorted_images)) {
+            throw std::runtime_error(
+                "Dataset is missing cam0/undistorted_alpha0. Falling back to raw cam0/data is "
+                "not supported here because the pipeline expects undistorted pinhole images and "
+                "does not apply distortion coefficients from sensor.yaml. "
+                "Please provide undistorted_alpha0 for dataset root: " + root.string() +
+                " (raw images found at: " + raw_images.string() + ")");
+        }
+        config.images_dir = undistorted_images.string();
 
         // Current DatasetLoader can derive frame timestamps from timestamp-named images.
         config.frame_timestamps_path.clear();
