@@ -16,6 +16,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def image_media_type(path: Path) -> str:
+    """Return the MIME media type for an image path based on its file extension."""
+    return "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+
+
 def build_grid_segments(extent: int = 10, step: int = 1, z: float = 0.0) -> list[list[list[float]]]:
     segments: list[list[list[float]]] = []
     for value in range(-extent, extent + 1, step):
@@ -191,8 +196,7 @@ def run_server(args: argparse.Namespace) -> int:
 
                     image_path = Path(message.get("image_path", ""))
                     if image_path != last_image_path and image_path.is_file():
-                        _mt = "image/png" if image_path.suffix.lower() == ".png" else "image/jpeg"
-                        rr.log("camera/first_view", rr.EncodedImage(contents=image_path.read_bytes(), media_type=_mt))
+                        rr.log("camera/first_view", rr.EncodedImage(contents=image_path.read_bytes(), media_type=image_media_type(image_path)))
                         last_image_path = image_path
                     continue
 
@@ -278,8 +282,7 @@ def run_server(args: argparse.Namespace) -> int:
 
                     image_path = Path(message.get("image_path", ""))
                     if image_path != last_image_path and image_path.is_file():
-                        _mt = "image/png" if image_path.suffix.lower() == ".png" else "image/jpeg"
-                        rr.log("camera/first_view", rr.EncodedImage(contents=image_path.read_bytes(), media_type=_mt))
+                        rr.log("camera/first_view", rr.EncodedImage(contents=image_path.read_bytes(), media_type=image_media_type(image_path)))
                         last_image_path = image_path
                     continue
 
