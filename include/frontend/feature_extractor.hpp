@@ -10,9 +10,9 @@ namespace vio {
 
 struct ShiTomasiParams {
     int maxCorners = 500;
-    double qualityLevel = 0.01;
-    double minDistance = 10.0;
-    int blockSize = 5;
+    double qualityLevel = 0.001;
+    double minDistance = 5.0;
+    int blockSize = 3;
     double gaussianSigma = 1.0;
     int nmsRadius = 2;
 };

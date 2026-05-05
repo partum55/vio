@@ -14,8 +14,8 @@ struct FeatureRefreshParams {
     int minTrackedFeatures = 50;
     int targetFeatures = 100;
     float suppressionRadius = 10.0f;
-    double qualityLevel = 0.01;
-    double minDistance = 10.0;
+    double qualityLevel = 0.001;
+    double minDistance = 5.0;
 };
 
 struct VisualFrontendParams {

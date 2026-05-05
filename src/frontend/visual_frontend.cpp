@@ -100,7 +100,7 @@ void VisualFrontend::setPivot(
     detector_params.maxCorners = params_.initialFeatures;
     detector_params.qualityLevel = params_.refresh.qualityLevel;
     detector_params.minDistance = params_.refresh.minDistance;
-    detector_params.blockSize = 5;
+    detector_params.blockSize = 3;
     detector_params.gaussianSigma = 1.0;
     detector_params.nmsRadius = 2;
 

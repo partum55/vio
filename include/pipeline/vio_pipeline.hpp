@@ -4,6 +4,7 @@
 #include "geometry/landmark_map.hpp"
 #include "geometry/pnp_solver.hpp"
 #include "geometry/triangulator.hpp"
+#include "imu/imu_processor.hpp"
 
 #include <cstddef>
 #include <filesystem>
@@ -104,6 +105,8 @@ namespace vio {
 
         static VioRunResult runConfigured(const VioRunConfig& config);
 
+        void setImuProcessor(ImuProcessor* imu_processor);
+
     private:
         enum class Stage {
             NeedPivot,
@@ -139,6 +142,8 @@ namespace vio {
         LandmarkMap landmark_map_;
 
         std::vector<TrackedFrame> frames_;
+
+        ImuProcessor* imu_processor_ = nullptr;
     };
 
 } // namespace vio
