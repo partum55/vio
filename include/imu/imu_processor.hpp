@@ -17,8 +17,6 @@ struct ImuSample {
 
 struct Pose {
     double t = 0.0;
-    // IMU/body pose prior. Do not treat this as a camera pose unless the
-    // calibrated body-to-camera extrinsic has been explicitly applied.
     Eigen::Quaterniond q = Eigen::Quaterniond(1, 0, 0, 0);
     Eigen::Vector3d v = Eigen::Vector3d::Zero();
     Eigen::Vector3d p = Eigen::Vector3d::Zero();
@@ -41,6 +39,13 @@ public:
     Pose getCurrentPose() const;
 
     double computeBaseline(const Pose& pivot_pose) const;
+
+    void correctVelocityFromVisualDisplacement(
+        const Eigen::Vector3d& pivot_visual_position,
+        const Eigen::Vector3d& current_visual_position,
+        double pivot_timestamp,
+        double current_timestamp
+    );
 
 private:
     std::vector<ImuSample> imu_;

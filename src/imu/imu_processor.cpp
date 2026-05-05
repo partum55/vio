@@ -126,7 +126,9 @@ public:
     double sigma_meas;
     double q_process;
 
-    Kalman(double sigma_meas_ = 0.01, double q_process_ = 1.0) : sigma_meas(sigma_meas_), q_process(q_process_)
+    Kalman(double sigma_meas_ = 0.01, double q_process_ = 1.0)
+        : sigma_meas(sigma_meas_),
+          q_process(q_process_)
     {
         mu << 0.0, 0.0;
         Sigma << 1.0, 0.0, 0.0, 1.0;
@@ -136,19 +138,16 @@ public:
     {
         mu << first_measurement, 0.0;
 
-        Sigma << sigma_meas * sigma_meas, 0.0,
-                 0.0, 1.0;
+        Sigma << sigma_meas * sigma_meas, 0.0, 0.0, 1.0;
     }
 
     void predict(double dt)
     {
         Eigen::Matrix2d A;
-        A << 1.0, dt,
-             0.0, 1.0;
+        A << 1.0, dt, 0.0, 1.0;
 
         Eigen::Matrix2d Q;
-        Q << dt * dt * dt / 3.0, dt * dt / 2.0,
-             dt * dt / 2.0, dt;
+        Q << dt * dt * dt / 3.0, dt * dt / 2.0, dt * dt / 2.0, dt;
 
         Q *= q_process;
 
@@ -176,7 +175,8 @@ public:
     }
 };
 
-ImuProcessor::ImuProcessor(const Eigen::Vector3d& gravity) : gravity_(gravity)
+ImuProcessor::ImuProcessor(const Eigen::Vector3d& gravity)
+    : gravity_(gravity)
 {
 }
 
@@ -204,7 +204,10 @@ bool ImuProcessor::initialize(
         }
     );
 
-    const ImuInitResult init = estimateInitialImuState(imu_, start_time, init_duration_sec
+    const ImuInitResult init = estimateInitialImuState(
+        imu_,
+        start_time,
+        init_duration_sec
     );
 
     if (!init.valid) {
@@ -229,6 +232,7 @@ bool ImuProcessor::initialize(
     gyro_bias_ = init.avg_gyro;
 
     const Eigen::Vector3d gravity_body_expected = pose_.q.conjugate() * gravity_;
+
     accel_bias_ = init.avg_acc - gravity_body_expected;
 
     initialized_ = true;
@@ -283,6 +287,77 @@ double ImuProcessor::computeBaseline(const Pose& pivot_pose) const
     return (pose_.p - pivot_pose.p).norm();
 }
 
+void ImuProcessor::correctVelocityFromVisualDisplacement(
+    const Eigen::Vector3d& pivot_visual_position,
+    const Eigen::Vector3d& current_visual_position,
+    double pivot_timestamp,
+    double current_timestamp
+)
+{
+    if (!initialized_) {
+        return;
+    }
+
+    const double dt = current_timestamp - pivot_timestamp;
+
+    if (dt <= 1e-6 || !std::isfinite(dt)) {
+        return;
+    }
+
+    const Eigen::Vector3d visual_delta =
+        current_visual_position - pivot_visual_position;
+
+    if (!visual_delta.allFinite()) {
+        return;
+    }
+
+    const Eigen::Vector3d visual_velocity = visual_delta / dt;
+
+    const double visual_speed = visual_velocity.norm();
+    const double imu_speed = pose_.v.norm();
+
+    if (!std::isfinite(visual_speed) || !std::isfinite(imu_speed)) {
+        return;
+    }
+
+    if (visual_speed < 1e-6) {
+        return;
+    }
+
+    if (imu_speed < 1e-6) {
+        pose_.v = visual_velocity;
+
+        std::cout << "IMU velocity correction: replaced zero velocity with visual velocity = "
+                  << pose_.v.transpose()
+                  << "\n";
+
+        return;
+    }
+
+    double velocity_scale = visual_speed / imu_speed;
+
+    velocity_scale = std::clamp(
+        velocity_scale,
+        0.2,
+        2.0
+    );
+
+    constexpr double alpha = 0.3;
+
+    const double blended_scale =
+        (1.0 - alpha) + alpha * velocity_scale;
+
+    pose_.v *= blended_scale;
+
+    std::cout << "IMU velocity correction: "
+              << "visual_speed=" << visual_speed
+              << ", imu_speed=" << imu_speed
+              << ", scale=" << velocity_scale
+              << ", blended_scale=" << blended_scale
+              << ", corrected_v=" << pose_.v.transpose()
+              << "\n";
+}
+
 void integrateImuFiltered(
     const std::vector<ImuSample>& imu,
     double t0,
@@ -320,8 +395,11 @@ void integrateImuFiltered(
 
     const Eigen::Vector3d gyro_bias = init.avg_gyro;
 
-    const Eigen::Vector3d gravity_body_expected = pose.q.conjugate() * gravity;
-    const Eigen::Vector3d accel_bias = init.avg_acc - gravity_body_expected;
+    const Eigen::Vector3d gravity_body_expected =
+        pose.q.conjugate() * gravity;
+
+    const Eigen::Vector3d accel_bias =
+        init.avg_acc - gravity_body_expected;
 
     const double gyro_noise_density = 1.6968e-04;
     const double gyro_random_walk = 1.9393e-05;
@@ -445,8 +523,11 @@ void integrateImuRaw(
 
     const Eigen::Vector3d gyro_bias = init.avg_gyro;
 
-    const Eigen::Vector3d gravity_body_expected = pose.q.conjugate() * gravity;
-    const Eigen::Vector3d accel_bias = init.avg_acc - gravity_body_expected;
+    const Eigen::Vector3d gravity_body_expected =
+        pose.q.conjugate() * gravity;
+
+    const Eigen::Vector3d accel_bias =
+        init.avg_acc - gravity_body_expected;
 
     while (idx < imu.size() && imu[idx].t <= t1) {
         const ImuSample& s = imu[idx];

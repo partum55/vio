@@ -14,6 +14,8 @@ PIP_LOG="${LOG_DIR}/pip.log"
 
 mkdir -p "${LOG_DIR}"
 
+GPU_BUILD_MODE="${VIO_ENABLE_GPU_ACCELERATION:-AUTO}"
+
 say() {
   printf '[run] %s\n' "$1"
 }
@@ -50,6 +52,9 @@ if [[ "${1-}" == "--help" || "${1-}" == "-h" ]]; then
   echo "Example: ./run.sh --video --video-out ../results/points.mp4"
   echo "Example: ./run.sh --both /path/to/euroc_dataset --video-out ../results/points.mp4"
   echo "Example: ./run.sh --points"
+  echo ""
+  echo "Environment:"
+  echo "  VIO_ENABLE_GPU_ACCELERATION=AUTO|ON|OFF   OpenCL build mode, default AUTO."
   exit 0
 fi
 
@@ -120,7 +125,11 @@ fi
 
 OPENCV_DIR="${OpenCV_DIR:-${DEFAULT_OPENCV_DIR}}"
 if [[ ! -f "${OPENCV_DIR}/OpenCVConfig.cmake" ]]; then
-  DETECTED_OPENCV_DIR="$(find /usr /usr/local /opt -name OpenCVConfig.cmake 2>/dev/null | head -n 1 | xargs -r dirname)"
+  DETECTED_OPENCV_CONFIG="$(find /usr /usr/local /opt -name OpenCVConfig.cmake 2>/dev/null | head -n 1 || true)"
+  DETECTED_OPENCV_DIR=""
+  if [[ -n "${DETECTED_OPENCV_CONFIG}" ]]; then
+    DETECTED_OPENCV_DIR="$(dirname "${DETECTED_OPENCV_CONFIG}")"
+  fi
   if [[ -n "${DETECTED_OPENCV_DIR}" ]]; then
     OPENCV_DIR="${DETECTED_OPENCV_DIR}"
   fi
@@ -132,6 +141,7 @@ if [[ ! -f "${OPENCV_DIR}/OpenCVConfig.cmake" ]]; then
   exit 1
 fi
 say "OpenCV: ${OPENCV_DIR}"
+say "OpenCL build mode: ${GPU_BUILD_MODE}"
 
 export VIO_LOG_DIR="${LOG_DIR}"
 
@@ -155,7 +165,9 @@ else
   say "Rerun: disabled"
 fi
 
-run_quiet "Configure" "${CONFIGURE_LOG}" cmake -S "${ROOT_DIR}" -B "${BUILD_DIR}" -DOpenCV_DIR="${OPENCV_DIR}"
+run_quiet "Configure" "${CONFIGURE_LOG}" cmake -S "${ROOT_DIR}" -B "${BUILD_DIR}" \
+  -DOpenCV_DIR="${OPENCV_DIR}" \
+  -DENABLE_GPU_ACCELERATION="${GPU_BUILD_MODE}"
 run_quiet "Build" "${BUILD_LOG}" cmake --build "${BUILD_DIR}" -j
 
 RERUN_HOST="${VIO_RERUN_HOST:-127.0.0.1}"

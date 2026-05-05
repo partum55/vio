@@ -242,6 +242,11 @@ VioPipeline::VioPipeline(
     }
 }
 
+void VioPipeline::setImuProcessor(ImuProcessor* imu_processor)
+{
+    imu_processor_ = imu_processor;
+}
+
 void VioPipeline::reset() {
     stage_ = Stage::NeedPivot;
     status_ = VioStatus::NeedFirstFrame;
@@ -404,6 +409,8 @@ VioRunResult VioPipeline::runConfigured(const VioRunConfig& config) {
             config.triangulation,
             PnPParams{}
         );
+
+        pipeline.setImuProcessor(&imu);
 
         StreamerConfig streamer_config;
         streamer_config.realtime = config.stream_realtime;
@@ -707,8 +714,13 @@ bool VioPipeline::triangulateFromPivot(const TrackedFrame& current, int min_crea
 }
 
 bool VioPipeline::refinePoseWithPnP(TrackedFrame& current) {
+    if (!pivot_valid_) {
+        return false;
+    }
+
     std::vector<Eigen::Vector3d> points_3d_w;
     std::vector<Eigen::Vector2d> points_2d;
+
     landmark_map_.buildPnPCorrespondences(
         current.observations,
         points_3d_w,
@@ -723,11 +735,26 @@ bool VioPipeline::refinePoseWithPnP(TrackedFrame& current) {
     }
 
     const double jump = (pnp_result.pose.t_wc - current.state.t_wc).norm();
+
     if (!std::isfinite(jump)) {
         return false;
     }
 
+    const FrameState pivot_state = pivot_.state;
+
     current.state = pnp_result.pose;
+
+    if (imu_processor_ != nullptr) {
+        imu_processor_->correctVelocityFromVisualDisplacement(
+            pivot_state.t_wc,
+            current.state.t_wc,
+            pivot_state.timestamp,
+            current.state.timestamp
+        );
+
+        current.state.v_w = imu_processor_->getCurrentPose().v;
+    }
+
     return true;
 }
 
