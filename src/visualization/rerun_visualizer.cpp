@@ -67,7 +67,8 @@ void RerunVisualizer::logPose(const FrameState& pose) {
          << "\"timestamp\":" << pose.timestamp << ","
          << "\"position\":" << vector3ToJson(pose.t_wc) << ","
          << "\"orientation_xyzw\":" << quatToJson(pose.q_wc) << ","
-         << "\"velocity\":" << vector3ToJson(pose.v_w)
+         << "\"velocity\":" << vector3ToJson(pose.v_w) << ","
+         << "\"acceleration\":" << vector3ToJson(pose.a_w)
          << "}";
     (void)sendLine(json.str());
 }

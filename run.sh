@@ -41,7 +41,7 @@ if [[ "${1-}" == "--help" || "${1-}" == "-h" ]]; then
   echo "Modes:"
   echo "  --plain, --simple, --no-vis    Run pipeline without visualization. This is the default."
   echo "  --rerun, --vis                 Run pipeline with live Rerun window."
-  echo "  --video, --points              Generate MP4 points overlay from dataset images."
+  echo "  --video, --points              Generate MP4 points/acceleration overlay from dataset images."
   echo "  --both                         Run Rerun window and generate MP4."
   echo ""
   echo "   or: ./run.sh --demo [vio options...]"
@@ -116,7 +116,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "${RUN_POINTS}" == "1" ]]; then
-  FORWARD_ARGS+=(--points)
+  FORWARD_ARGS+=(--video)
 fi
 
 if [[ "${RUN_RERUN}" == "0" ]]; then

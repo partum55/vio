@@ -3,6 +3,8 @@
 #include <opencv2/imgproc.hpp>
 
 #include <algorithm>
+#include <iomanip>
+#include <sstream>
 #include <string>
 
 namespace vio {
@@ -10,7 +12,8 @@ namespace vio {
 cv::Mat drawPointsVideoFrame(
     const cv::Mat& frame,
     const std::vector<Track>& tracks,
-    const int tail_length
+    const int tail_length,
+    const FrameState* state
 ) {
     cv::Mat vis = frame.clone();
 
@@ -42,6 +45,25 @@ cv::Mat drawPointsVideoFrame(
         2,
         cv::LINE_AA
     );
+
+    if (state != nullptr) {
+        std::ostringstream label;
+        label << std::fixed << std::setprecision(2)
+              << "acc [m/s^2]: "
+              << state->a_w.x() << ", "
+              << state->a_w.y() << ", "
+              << state->a_w.z();
+        cv::putText(
+            vis,
+            label.str(),
+            cv::Point(20, 62),
+            cv::FONT_HERSHEY_SIMPLEX,
+            0.65,
+            cv::Scalar(255, 255, 255),
+            2,
+            cv::LINE_AA
+        );
+    }
 
     return vis;
 }

@@ -39,8 +39,9 @@ void printUsage(const char* executable)
         << "       " << executable << " <dataset_root> [options]\n"
         << "\n"
         << "Options:\n"
-        << "  --points, --points-video       Write MP4 visualization with tracked 2D points.\n"
-        << "  --video-out <path>             Output path for --points-video.\n"
+        << "  --video, --points, --points-video\n"
+        << "                                  Write MP4 visualization with tracked 2D points and acceleration.\n"
+        << "  --video-out <path>             Output path for --video/--points-video.\n"
         << "  --no-rerun                     Disable Rerun live visualization logger.\n"
         << "  --realtime                     Replay dataset using timestamp-based timing.\n"
         << "  --rate <value>                 Playback rate for --realtime, default 1.0.\n"
@@ -64,7 +65,7 @@ AppOptions parseArgs(int argc, char** argv)
         const std::string_view arg(argv[i]);
         if (arg == "--help" || arg == "-h") {
             options.help = true;
-        } else if (arg == "--points" || arg == "--points-video") {
+        } else if (arg == "--video" || arg == "--points" || arg == "--points-video") {
             options.points_video = true;
         } else if (arg == "--video-out") {
             options.video_out = requireValue(i, argc, argv, arg);
@@ -109,7 +110,6 @@ public:
         vio::VioStatus status,
         const std::filesystem::path& image_path)
     {
-        (void)frame;
         (void)landmarks;
         (void)status;
 
@@ -121,7 +121,7 @@ public:
         }
 
         openIfNeeded(image.size());
-        writer_.write(vio::drawPointsVideoFrame(image, tracks, 15));
+        writer_.write(vio::drawPointsVideoFrame(image, tracks, 15, &frame.state));
     }
 
 private:
@@ -193,8 +193,8 @@ int main(int argc, char** argv)
     }
 
     vio::VioRunConfig config;
-    config.imu_csv_path = "../data/imu0/data.csv";
-    config.images_dir = "../data/cam0/undistorted_alpha0/";
+    config.imu_csv_path = "data/imu0/data.csv";
+    config.images_dir = "data/cam0/undistorted_alpha0";
     // The images in this dataset are timestamp-named and aligned with imu0/data.csv.
     // data/frame_timestamps.txt belongs to a different time range and breaks pose propagation.
     config.frame_timestamps_path.clear();
@@ -227,16 +227,16 @@ int main(int argc, char** argv)
 
     config.camera_intrinsics = intrinsics;
 
-    config.output_poses_csv = "../results/poses.csv";
-    config.output_observations_csv = "../results/observations.csv";
+    config.output_poses_csv = "results/poses.csv";
+    config.output_observations_csv = "results/observations.csv";
     config.output_video_path = options.video_out;
-    config.output_landmarks_csv = "../results/landmarks.csv";
+    config.output_landmarks_csv = "results/landmarks.csv";
 
-    config.gravity = Eigen::Vector3d(0.0, 0.0, 9.81);
-    config.tracker_win_size = 9;
+    config.gravity = Eigen::Vector3d(0.0, 0.0, 9.80665);
+    config.tracker_win_size = 21;
     config.tracker_max_level = 3;
-    config.tracker_max_iters = 10;
-    config.tracker_eps = 1e-3f;
+    config.tracker_max_iters = 30;
+    config.tracker_eps = 0.01f;
     config.stream_realtime = options.realtime;
     config.stream_rate = options.stream_rate;
     config.stream_max_image_queue = options.max_image_queue;

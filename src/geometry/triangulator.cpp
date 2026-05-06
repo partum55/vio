@@ -18,7 +18,7 @@ namespace
     constexpr int kMaxFrameGap = 12;
     constexpr int kLocalSupportPadding = 8;
     constexpr double kPreferredBaseline = 0.20;
-    constexpr double kMaxReasonableBaseline = 1.50;
+    constexpr double kMaxReasonableBaseline = 100.0; // Increased from 1.5
 
     struct TrackObservation
     {

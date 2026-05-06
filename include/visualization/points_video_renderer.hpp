@@ -11,7 +11,8 @@ namespace vio {
 cv::Mat drawPointsVideoFrame(
     const cv::Mat& frame,
     const std::vector<Track>& tracks,
-    int tail_length = 15
+    int tail_length = 15,
+    const FrameState* state = nullptr
 );
 
 } // namespace vio

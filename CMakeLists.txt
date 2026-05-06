@@ -3,6 +3,7 @@ project(vio_project)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+include(CTest)
 set(ENABLE_GPU_ACCELERATION "AUTO" CACHE STRING "Enable OpenCL acceleration: AUTO, ON, or OFF")
 set_property(CACHE ENABLE_GPU_ACCELERATION PROPERTY STRINGS AUTO ON OFF)
 option(ENABLE_RERUN_VISUALIZATION "Enable Rerun visualization" ON)
@@ -11,6 +12,7 @@ find_package(Eigen3 REQUIRED NO_MODULE)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs video videoio calib3d)
 find_package(Threads REQUIRED)
 find_package(TBB REQUIRED)
+find_package(Ceres REQUIRED)
 
 string(TOUPPER "${ENABLE_GPU_ACCELERATION}" VIO_GPU_ACCELERATION_MODE)
 if(VIO_GPU_ACCELERATION_MODE STREQUAL "TRUE" OR VIO_GPU_ACCELERATION_MODE STREQUAL "1")
@@ -60,6 +62,13 @@ function(configure_vio_target target_name)
             TBB::tbb
     )
 
+    if(TARGET Ceres::ceres)
+        target_link_libraries(${target_name} PRIVATE Ceres::ceres)
+    else()
+        target_include_directories(${target_name} PRIVATE ${CERES_INCLUDE_DIRS})
+        target_link_libraries(${target_name} PRIVATE ${CERES_LIBRARIES})
+    endif()
+
     if(OpenCL_FOUND)
         if(TARGET OpenCL::OpenCL)
             target_link_libraries(${target_name} PRIVATE OpenCL::OpenCL)
@@ -87,6 +96,10 @@ add_executable(vio
         # approved pipeline
         src/pipeline/vio_pipeline.cpp
 
+        # estimator scaffolding
+        src/estimation/sliding_window_estimator.cpp
+        src/estimation/visual_inertial_initializer.cpp
+
         # approved geometry
         src/geometry/triangulator.cpp
         src/geometry/pnp_solver.cpp
@@ -94,6 +107,7 @@ add_executable(vio
 
         # approved imu
         src/imu/imu_processor.cpp
+        src/imu/imu_preintegration.cpp
 
         # approved io
         src/io/dataset_loader.cpp
@@ -108,4 +122,16 @@ configure_vio_target(vio)
 
 if(ENABLE_RERUN_VISUALIZATION)
     target_compile_definitions(vio PRIVATE VIO_ENABLE_RERUN_VISUALIZATION)
+endif()
+
+if(BUILD_TESTING)
+    add_executable(test_visual_inertial_initializer
+            tests/test_visual_inertial_initializer.cpp
+            src/estimation/visual_inertial_initializer.cpp
+            src/imu/imu_preintegration.cpp
+            src/imu/imu_processor.cpp
+    )
+    configure_vio_target(test_visual_inertial_initializer)
+    add_test(NAME visual_inertial_initializer
+             COMMAND test_visual_inertial_initializer)
 endif()

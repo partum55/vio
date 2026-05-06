@@ -15,6 +15,30 @@ struct FrameState {
     Eigen::Quaterniond q_wc = Eigen::Quaterniond(1, 0, 0, 0);
     Eigen::Vector3d t_wc = Eigen::Vector3d::Zero();
     Eigen::Vector3d v_w = Eigen::Vector3d::Zero();
+    Eigen::Vector3d a_w = Eigen::Vector3d::Zero();
+};
+
+struct NavState {
+    double timestamp = 0.0;
+    Eigen::Quaterniond q_wb = Eigen::Quaterniond(1, 0, 0, 0);
+    Eigen::Vector3d p_wb = Eigen::Vector3d::Zero();
+    Eigen::Vector3d v_wb = Eigen::Vector3d::Zero();
+    Eigen::Vector3d a_wb = Eigen::Vector3d::Zero();
+    Eigen::Vector3d gyro_bias = Eigen::Vector3d::Zero();
+    Eigen::Vector3d accel_bias = Eigen::Vector3d::Zero();
+};
+
+struct CameraImuExtrinsics {
+    // EuRoC T_BS convention: p_B = R_BS * p_S + t_BS. For cam0, S is C.
+    Eigen::Matrix4d T_BS = Eigen::Matrix4d::Identity();
+
+    [[nodiscard]] Eigen::Matrix3d R_BC() const {
+        return T_BS.block<3, 3>(0, 0);
+    }
+
+    [[nodiscard]] Eigen::Vector3d t_BC() const {
+        return T_BS.block<3, 1>(0, 3);
+    }
 };
 
 struct Observation {

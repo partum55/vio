@@ -14,6 +14,7 @@ namespace
 {
     constexpr double init_duration = 3.0;
     constexpr double epsilon = 1e-12;
+    constexpr double max_reasonable_speed_mps = 3.0;
 
     struct ImuInitResult
     {
@@ -81,23 +82,77 @@ namespace
 
         return result;
     }
+
+    ImuSample interpolateSample(
+        const ImuSample& a,
+        const ImuSample& b,
+        double timestamp
+    )
+    {
+        if (b.t <= a.t) {
+            ImuSample out = a;
+            out.t = timestamp;
+            return out;
+        }
+
+        const double alpha = std::clamp((timestamp - a.t) / (b.t - a.t), 0.0, 1.0);
+        ImuSample out;
+        out.t = timestamp;
+        out.gyro = (1.0 - alpha) * a.gyro + alpha * b.gyro;
+        out.acc = (1.0 - alpha) * a.acc + alpha * b.acc;
+        return out;
+    }
+
+    void integrateOneSample(
+        Pose& pose,
+        const ImuSample& sample,
+        const Eigen::Vector3d& gyro_bias,
+        const Eigen::Vector3d& accel_bias,
+        const Eigen::Vector3d& gravity
+    )
+    {
+        const double dt = sample.t - pose.t;
+
+        if (dt <= 0.0) {
+            return;
+        }
+
+        if (dt > 0.1) {
+            std::cout << "[IMU] Large dt detected: " << dt << " (t=" << sample.t << ", pose.t=" << pose.t << ")" << std::endl;
+        }
+        const Eigen::Vector3d gyro_corr = sample.gyro - gyro_bias;
+        const Eigen::Vector3d acc_corr = sample.acc - accel_bias;
+
+        pose.q *= deltaQuat(gyro_corr, dt);
+        pose.q.normalize();
+
+        const Eigen::Vector3d acc_world = pose.q * acc_corr;
+        const Eigen::Vector3d acc_lin = acc_world - gravity;
+
+        const Eigen::Vector3d v_prev = pose.v;
+
+        pose.a = acc_lin;
+        pose.v += acc_lin * dt;
+        const double speed = pose.v.norm();
+        if (std::isfinite(speed) && speed > max_reasonable_speed_mps) {
+            pose.v *= max_reasonable_speed_mps / speed;
+        }
+        pose.p += v_prev * dt + 0.5 * acc_lin * dt * dt;
+
+        pose.t = sample.t;
+    }
 }
 
 Eigen::Quaterniond deltaQuat(const Eigen::Vector3d& omega, double dt)
 {
     const double angle = omega.norm() * dt;
-
     if (angle < epsilon) {
-        return Eigen::Quaterniond(1.0, 0.0, 0.0, 0.0);
+        return Eigen::Quaterniond::Identity();
     }
-
     const Eigen::Vector3d axis = omega.normalized();
-
-    Eigen::Quaterniond dq(Eigen::AngleAxisd(angle, axis));
-    dq.normalize();
-
-    return dq;
+    return Eigen::Quaterniond(Eigen::AngleAxisd(angle, axis));
 }
+
 
 Eigen::Quaterniond initialOrientationFromAccel(
     const Eigen::Vector3d& acc_meas,
@@ -189,6 +244,7 @@ bool ImuProcessor::initialize(
     imu_ = imu_data;
     initialized_ = false;
     current_idx_ = 0;
+    init_end_time_ = 0.0;
     pose_ = Pose{};
 
     if (imu_.empty()) {
@@ -223,6 +279,7 @@ bool ImuProcessor::initialize(
     }
 
     pose_.t = imu_[current_idx_].t;
+    init_end_time_ = pose_.t;
     pose_.p.setZero();
     pose_.v.setZero();
 
@@ -250,30 +307,21 @@ void ImuProcessor::propagateUntil(double timestamp)
     while (current_idx_ < imu_.size() && imu_[current_idx_].t <= timestamp) {
         const ImuSample& s = imu_[current_idx_];
 
-        const double dt = s.t - pose_.t;
-
-        if (dt <= 0.0) {
-            ++current_idx_;
-            continue;
-        }
-
-        const Eigen::Vector3d gyro_corr = s.gyro - gyro_bias_;
-        const Eigen::Vector3d acc_corr = s.acc - accel_bias_;
-
-        pose_.q *= deltaQuat(gyro_corr, dt);
-        pose_.q.normalize();
-
-        const Eigen::Vector3d acc_world = pose_.q * acc_corr;
-        const Eigen::Vector3d acc_lin = acc_world - gravity_;
-
-        const Eigen::Vector3d v_prev = pose_.v;
-
-        pose_.v += acc_lin * dt;
-        pose_.p += v_prev * dt + 0.5 * acc_lin * dt * dt;
-
-        pose_.t = s.t;
+        integrateOneSample(pose_, s, gyro_bias_, accel_bias_, gravity_);
 
         ++current_idx_;
+    }
+
+    if (current_idx_ > 0 &&
+        current_idx_ < imu_.size() &&
+        pose_.t < timestamp &&
+        timestamp < imu_[current_idx_].t) {
+        const ImuSample boundary = interpolateSample(
+            imu_[current_idx_ - 1],
+            imu_[current_idx_],
+            timestamp
+        );
+        integrateOneSample(pose_, boundary, gyro_bias_, accel_bias_, gravity_);
     }
 }
 
@@ -282,9 +330,38 @@ Pose ImuProcessor::getCurrentPose() const
     return pose_;
 }
 
+double ImuProcessor::initEndTime() const
+{
+    return init_end_time_;
+}
+
+Eigen::Vector3d ImuProcessor::gyroBias() const
+{
+    return gyro_bias_;
+}
+
+Eigen::Vector3d ImuProcessor::accelBias() const
+{
+    return accel_bias_;
+}
+
 double ImuProcessor::computeBaseline(const Pose& pivot_pose) const
 {
     return (pose_.p - pivot_pose.p).norm();
+}
+
+void ImuProcessor::resetStateFromNavState(const NavState& nav)
+{
+    if (!initialized_) {
+        return;
+    }
+    pose_.q = nav.q_wb.normalized();
+    pose_.p = nav.p_wb;
+    pose_.v = nav.v_wb;
+    pose_.a = nav.a_wb;
+    pose_.t = nav.timestamp;
+    gyro_bias_ = nav.gyro_bias;
+    accel_bias_ = nav.accel_bias;
 }
 
 void ImuProcessor::correctVelocityFromVisualDisplacement(
@@ -324,12 +401,21 @@ void ImuProcessor::correctVelocityFromVisualDisplacement(
         return;
     }
 
+    constexpr double max_visual_speed = 8.0; // m/s
+
+    if (visual_speed > max_visual_speed) {
+        std::cout << "IMU velocity correction skipped: visual_speed too high = "
+                << visual_speed
+                << "\n";
+        return;
+    }
+
     if (imu_speed < 1e-6) {
         pose_.v = visual_velocity;
 
         std::cout << "IMU velocity correction: replaced zero velocity with visual velocity = "
-                  << pose_.v.transpose()
-                  << "\n";
+                << pose_.v.transpose()
+                << "\n";
 
         return;
     }
@@ -475,6 +561,7 @@ void integrateImuFiltered(
 
         const Eigen::Vector3d v_prev = pose.v;
 
+        pose.a = acc_lin;
         pose.v += acc_lin * dt;
         pose.p += v_prev * dt + 0.5 * acc_lin * dt * dt;
 
@@ -550,6 +637,7 @@ void integrateImuRaw(
 
         const Eigen::Vector3d v_prev = pose.v;
 
+        pose.a = acc_lin;
         pose.v += acc_lin * dt;
         pose.p += v_prev * dt + 0.5 * acc_lin * dt * dt;
 
@@ -631,13 +719,14 @@ bool saveTrajectoryCsv(const std::string& path, const std::vector<Pose>& traj)
         return false;
     }
 
-    out << "t,px,py,pz,vx,vy,vz,qw,qx,qy,qz\n";
+    out << "t,px,py,pz,vx,vy,vz,ax,ay,az,qw,qx,qy,qz\n";
     out << std::fixed << std::setprecision(9);
 
     for (const Pose& p : traj) {
         out << p.t << ","
             << p.p.x() << "," << p.p.y() << "," << p.p.z() << ","
             << p.v.x() << "," << p.v.y() << "," << p.v.z() << ","
+            << p.a.x() << "," << p.a.y() << "," << p.a.z() << ","
             << p.q.w() << "," << p.q.x() << "," << p.q.y() << "," << p.q.z()
             << "\n";
     }

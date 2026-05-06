@@ -5,6 +5,7 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
@@ -20,6 +21,13 @@ std::string readTextFile(const std::filesystem::path& path) {
     std::ostringstream buffer;
     buffer << file.rdbuf();
     return buffer.str();
+}
+
+std::filesystem::path stripTrailingSeparators(std::filesystem::path path) {
+    while (!path.empty() && path.filename().empty() && path.has_parent_path()) {
+        path = path.parent_path();
+    }
+    return path;
 }
 
 std::vector<double> parseNumberListAfterKey(const std::string& text,
@@ -91,6 +99,37 @@ CameraCalibration loadCameraCalibration(const std::filesystem::path& path) {
         }
     }
     return calibration;
+}
+
+ImuCalibration loadImuCalibration(const std::filesystem::path& path);
+
+std::optional<CameraCalibration> tryLoadCameraCalibration(
+    const std::filesystem::path& camera_dir
+) {
+    const std::filesystem::path undistorted_yaml =
+        camera_dir / "sensor-undistorted.yaml";
+    if (std::filesystem::exists(undistorted_yaml)) {
+        return loadCameraCalibration(undistorted_yaml);
+    }
+
+    const std::filesystem::path sensor_yaml = camera_dir / "sensor.yaml";
+    if (std::filesystem::exists(sensor_yaml)) {
+        return loadCameraCalibration(sensor_yaml);
+    }
+
+    return std::nullopt;
+}
+
+std::optional<ImuCalibration> tryLoadImuCalibration(
+    const std::filesystem::path& dataset_root
+) {
+    const std::filesystem::path imu_yaml =
+        dataset_root / "imu0" / "sensor.yaml";
+    if (std::filesystem::exists(imu_yaml)) {
+        return loadImuCalibration(imu_yaml);
+    }
+
+    return std::nullopt;
 }
 
 ImuCalibration loadImuCalibration(const std::filesystem::path& path) {
@@ -220,8 +259,22 @@ Dataset loadDataset(const DatasetLoadOptions& options) {
     }
 
     Dataset dataset;
-    dataset.root = std::filesystem::absolute(options.images_dir).parent_path();
+    const std::filesystem::path image_dir_abs =
+        std::filesystem::absolute(stripTrailingSeparators(options.images_dir));
+    const std::filesystem::path camera_dir = image_dir_abs.parent_path();
+    const std::filesystem::path dataset_root = camera_dir.parent_path();
+    dataset.root = dataset_root;
     dataset.camera = toCameraCalibration(options.camera_intrinsics);
+
+    if (const std::optional<CameraCalibration> camera_calibration =
+            tryLoadCameraCalibration(camera_dir)) {
+        dataset.camera = *camera_calibration;
+    }
+
+    if (const std::optional<ImuCalibration> imu_calibration =
+            tryLoadImuCalibration(dataset_root)) {
+        dataset.imu = *imu_calibration;
+    }
 
     dataset.frames = scanFramesFromDirectory(options.images_dir);
     if (dataset.frames.empty()) {

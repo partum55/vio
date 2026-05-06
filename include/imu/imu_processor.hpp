@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/types.hpp"
+
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -20,6 +22,7 @@ struct Pose {
     Eigen::Quaterniond q = Eigen::Quaterniond(1, 0, 0, 0);
     Eigen::Vector3d v = Eigen::Vector3d::Zero();
     Eigen::Vector3d p = Eigen::Vector3d::Zero();
+    Eigen::Vector3d a = Eigen::Vector3d::Zero();
 };
 
 class ImuProcessor {
@@ -37,8 +40,13 @@ public:
     void propagateUntil(double timestamp);
 
     Pose getCurrentPose() const;
+    double initEndTime() const;
+    Eigen::Vector3d gyroBias() const;
+    Eigen::Vector3d accelBias() const;
 
     double computeBaseline(const Pose& pivot_pose) const;
+
+    void resetStateFromNavState(const NavState& nav);
 
     void correctVelocityFromVisualDisplacement(
         const Eigen::Vector3d& pivot_visual_position,
@@ -56,6 +64,7 @@ private:
     Eigen::Vector3d accel_bias_ = Eigen::Vector3d::Zero();
 
     std::size_t current_idx_ = 0;
+    double init_end_time_ = 0.0;
     bool initialized_ = false;
 };
 
