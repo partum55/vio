@@ -2,14 +2,14 @@
 
 ## Overview
 
-Visual-Inertial Odometry (VIO) is the problem of estimating the **pose of an agent** using a sequence of camera images and measurements from an **IMU (Inertial Measurement Unit)**. :contentReference[oaicite:0]{index=0}
+Visual-Inertial Odometry (VIO) is the problem of estimating the **pose of an agent** using a sequence of camera images and measurements from an **IMU (Inertial Measurement Unit)**.
 
 The system combines:
 
 - **visual information** from a camera
 - **inertial measurements** (acceleration and angular velocity)
 
-VIO modules operate in **real time** and are widely used in robotics, autonomous navigation, and other applications. :contentReference[oaicite:1]{index=1}
+VIO modules operate in **real time** and are widely used in robotics, autonomous navigation, and other applications.
 
 ---
 
@@ -30,7 +30,7 @@ The system will include several main components:
 The final system will be evaluated using public datasets based on:
 
 - **trajectory accuracy**
-- **execution speed**. :contentReference[oaicite:2]{index=2}
+- **execution speed**.
 
 ---
 
@@ -158,8 +158,8 @@ Visual-Inertial Odometry is used in:
 
 The project uses **CMake**.
 
-### Compile
+### Build and run
 
 ```bash
-./compile.sh
+./run.sh            # configures, builds and runs the pipeline; ./run.sh --help lists the modes
 ```
